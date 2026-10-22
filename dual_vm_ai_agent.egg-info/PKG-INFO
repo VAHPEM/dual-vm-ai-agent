@@ -1,0 +1,10 @@
+Metadata-Version: 2.4
+Name: dual-vm-ai-agent
+Version: 0.1.0
+Summary: The Muscle: deterministic control of a Kali + Windows VM over SSH (run, read, screenshot, Frida, gdb).
+Requires-Python: >=3.10
+Requires-Dist: paramiko
+Requires-Dist: python-dotenv
+Requires-Dist: pillow
+Provides-Extra: mcp
+Requires-Dist: mcp>=1.2; extra == "mcp"

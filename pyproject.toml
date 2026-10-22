@@ -1,0 +1,19 @@
+[project]
+name = "dual-vm-ai-agent"
+version = "0.1.0"
+description = "The Muscle: deterministic control of a Kali + Windows VM over SSH (run, read, screenshot, Frida, gdb)."
+requires-python = ">=3.10"
+dependencies = ["paramiko", "python-dotenv", "pillow"]
+
+[project.optional-dependencies]
+mcp = ["mcp>=1.2"]
+
+[project.scripts]
+dualvm-mcp = "dualvm.mcp_server:main"
+
+[tool.setuptools]
+packages = ["dualvm"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
