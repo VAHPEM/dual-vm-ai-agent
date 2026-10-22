@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""dualvm.output — tach tu ctf-brain tools.py (pre-split), verbatim.
+"""dualvm.output — split from the original monorepo (verbatim).
 Xem TODO[coupling] cho cac cho can truyen tham so thay cho ws/reasoner."""
 from . import remote, config
 from ._result import VMResult, SLICE  # noqa

@@ -1,17 +1,17 @@
 # -*- coding: utf-8 -*-
-"""Kieu tra ve thuan du lieu cho dualvm. Khong biet gi ve CTF/flag/Workspace."""
+"""Kieu tra ve thuan du lieu cho dualvm. Khong biet gi ve flag/Workspace."""
 import re
 from dataclasses import dataclass, field
 
 SLICE = 4000
 MATCH_LABEL = "MATCH"
 
-# Mac dinh KHONG tim gi. ctf-brain tiem ham tim flag cua no vao bang set_matcher().
+# Mac dinh KHONG tim gi. caller tiem ham tim flag vao bang set_matcher().
 _MATCHER = [lambda text: None]
 
 
 def set_matcher(fn):
-    """ctf-brain goi cai nay mot lan de dualvm biet cach nhan ra flag.
+    """caller goi cai nay mot lan de dualvm biet cach nhan ra flag.
     Thu vien tu no khong co khai niem flag."""
     _MATCHER[0] = fn
 
@@ -23,7 +23,7 @@ def _find_match(text):
 @dataclass
 class VMResult:
     # Giu DUNG ten truong cua ToolResult cu (known/flag) de code chuyen sang
-    # KHONG phai sua than ham. ctf-brain nhan VMResult va doc .known/.flag/.detail
+    # KHONG phai sua than ham. caller nhan VMResult va doc .known/.flag/.detail
     # y nhu truoc, roi dong goi thanh ToolResult cua no.
     ok: bool
     summary: str

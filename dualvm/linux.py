@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""dualvm.linux — tach tu ctf-brain tools.py (pre-split), verbatim.
+"""dualvm.linux — split from the original monorepo (verbatim).
 Xem TODO[coupling] cho cac cho can truyen tham so thay cho ws/reasoner."""
 import re, shlex
 from . import remote
@@ -55,7 +55,7 @@ def linux_gui_run(command, wait=5, screen="1280x800x24", timeout=60):
 # The prelude is prepended to every run: it silences the debugger's own noise, keeps gdb
 # on the parent across webkit's fork()s, and hands the Brain the small set of helpers
 # that actually solved ch9 (read/write inferior memory, read a register, base+RVA).
-_GDB_PRELUDE = r'''# ctf-brain gdb prelude (muscle-side; no interpretation - just plumbing + helpers)
+_GDB_PRELUDE = r'''# gdb prelude (muscle-side; no interpretation - just plumbing + helpers)
 import gdb, struct, sys, re as _re
 
 def _flush(s):

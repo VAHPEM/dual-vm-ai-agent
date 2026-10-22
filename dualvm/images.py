@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""dualvm.images — tach tu ctf-brain tools.py (pre-split), verbatim.
+"""dualvm.images — split from the original monorepo (verbatim).
 Xem TODO[coupling] cho cac cho can truyen tham so thay cho ws/reasoner."""
 import os, base64, re
 from . import remote

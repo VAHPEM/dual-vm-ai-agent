@@ -5,12 +5,11 @@ two virtual machines — a Kali Linux VM and a Windows VM — over SSH: run comm
 read output, drive GUIs, take and read screenshots, script a debugger (gdb / Frida),
 and run background jobs. It **never interprets** results and has no notion of
 "flag", "challenge" or "task": every function runs something on a VM and returns the
-raw output as a plain `VMResult`. The decision-making Brain lives elsewhere
-(e.g. the `ctf-brain` agent), which imports this package.
+raw output as a plain `VMResult`. The decision-making Brain lives elsewhere — any agent that imports this
+package or drives it over MCP.
 
-This is the *Muscle* half of the former `ctf-brain` monorepo: the "what to do"
-(reasoning, the API-calling Brain) stayed in `ctf-brain`; the "how to act on the
-machines" moved here so it can be reused on its own — directly, or over MCP.
+`dualvm` is the "how to act on the machines" layer; the reasoning / API-calling
+Brain is a separate concern, so the two can be reused independently.
 
 ## Install
 
@@ -26,7 +25,7 @@ Two VMs reachable over SSH with one key. Point the package at your `.env` and ke
 | Environment variable | Meaning | Default |
 |---|---|---|
 | `DUALVM_ENV` | path to the `.env` holding the host/user vars | `<pkg>/../.env` |
-| `DUALVM_SSH_KEY` | path to the private SSH key for both VMs | `<pkg>/../.ssh_keys/ctf_orchestrator_ed25519` |
+| `DUALVM_SSH_KEY` | path to the private SSH key for both VMs | `<pkg>/../.ssh_keys/dualvm_ed25519` |
 
 `.env` keys: `KALI_HOST`, `KALI_USER`, `WIN_HOST`, `WIN_USER`, and optionally
 `WIN_PYTHON_EXE`, `KALI_PYTHON`. The key is never printed or committed.
@@ -112,14 +111,13 @@ that were refactored out of the tool bodies):
 Expose the Muscle to any MCP client (Claude Desktop / Claude Code):
 
 ```bash
-DUALVM_ENV=~/ctf-brain/.env DUALVM_SSH_KEY=~/ctf-brain/.ssh_keys/ctf_orchestrator_ed25519 \
-    python -m dualvm.mcp_server
+python -m dualvm.mcp_server      # reads .env + .ssh_keys next to the package
 ```
 
 Each tool above is published as an MCP tool; screenshots come back as image content.
 
 ## License / scope
 
-Built for authorized reverse-engineering and CTF work on VMs you own. The command
+Built for authorized reverse-engineering and security-analysis work on VMs you own. The command
 filter (`dualvm.safety`) refuses security-/system-config changes that are never
 needed for analysis.

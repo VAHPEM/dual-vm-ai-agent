@@ -18,9 +18,9 @@ WIN_PYTHON_EXE = os.environ.get(
     "WIN_PYTHON_EXE",
     r"C:\Users\vahpem\AppData\Local\Programs\Python\Python314\python.exe",
 )
-KALI_PYTHON = os.environ.get("KALI_PYTHON", "/home/vahpem/ctf-venv/bin/python3")
+KALI_PYTHON = os.environ.get("KALI_PYTHON", "/home/vahpem/analysis-venv/bin/python3")
 SSH_KEY_PATH = os.environ.get("DUALVM_SSH_KEY", os.path.join(
-    _HERE, "..", ".ssh_keys", "ctf_orchestrator_ed25519"))
+    _HERE, "..", ".ssh_keys", "dualvm_ed25519"))
 
 
 def _client(host, user, attempts=3):
@@ -410,7 +410,7 @@ $out | Out-File -FilePath "$S\\_gui_out.txt" -Encoding utf8
 """
 
 
-def run_in_session1(ps_body, timeout=60, task="ctfbrain_gui"):
+def run_in_session1(ps_body, timeout=60, task="dualvm_gui"):
     """Run a PowerShell body on the Windows INTERACTIVE desktop; return (text, timed_out).
 
     The body may use $S for the samples dir; whatever it Write-Output's comes back.

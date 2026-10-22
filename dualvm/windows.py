@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""dualvm.windows — tach tu ctf-brain tools.py (pre-split), verbatim.
+"""dualvm.windows — split from the original monorepo (verbatim).
 Xem TODO[coupling] cho cac cho can truyen tham so thay cho ws/reasoner."""
 import os, re, json, shlex
 from . import remote
@@ -544,7 +544,7 @@ def win_frida(script, program=None, args="", pid=None, wait=8, kill=True,
         )
         try:
             _lout, _lt = remote.run_in_session1(_ps, timeout=int(launch_wait) + 40,
-                                                task="ctfbrain_frida_launch")
+                                                task="dualvm_frida_launch")
         except Exception as _e:  # noqa: BLE001
             return VMResult(False, f"win_frida(launch): launch step failed: "
                                      f"{_e.__class__.__name__}: {_e}")
@@ -631,7 +631,7 @@ def win_frida(script, program=None, args="", pid=None, wait=8, kill=True,
         if desktop:
             text, timed_out = remote.run_in_session1(
                 '& "' + remote.WIN_PYTHON_EXE + '" "' + drv + '" 2>&1',
-                timeout=int(timeout), task="ctfbrain_frida")
+                timeout=int(timeout), task="dualvm_frida")
         else:
             o, e = remote.ssh_exec('"' + remote.WIN_PYTHON_EXE + '" "' + drv + '"',
                                    host="windows", read_timeout=int(timeout) + 30)
@@ -777,13 +777,13 @@ function Find-One($match, $target) {
 
 # The Win32 layer. One C# class so the PowerShell above it stays readable.
 _PS_WIN32 = r"""
-if (-not ("CtfWin32" -as [type])) {
+if (-not ("VmWin32" -as [type])) {
 Add-Type @"
 using System;
 using System.Text;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
-public class CtfWin32 {
+public class VmWin32 {
   public delegate bool EnumProc(IntPtr h, IntPtr l);
   [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L, T, R, B; }
   [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc cb, IntPtr l);
@@ -891,14 +891,14 @@ foreach ($w in $tops) {
   if ($i -ge $lim) { Write-Output "  ...(UIA cut at limit)"; break }
 }
 Write-Output ("UIA_CONTROL_COUNT=" + $i)
-$w32 = [CtfWin32]::Dump("__MATCH__", $lim)
+$w32 = [VmWin32]::Dump("__MATCH__", $lim)
 foreach ($l in $w32) { Write-Output $l }
 Write-Output ("W32_LINE_COUNT=" + $w32.Count)
 if ($tops.Count -eq 0 -and $w32.Count -eq 0) { Write-Output "NO_WINDOW_MATCHED" }
 """.replace("__LIM__", str(int(limit))).replace("__MATCH__", m)
     try:
         text, timed_out = remote.run_in_session1(body, timeout=int(timeout),
-                                                 task="ctfbrain_uitree")
+                                                 task="dualvm_uitree")
     except Exception as e:  # noqa: BLE001
         return VMResult(False, f"win_ui_tree failed: {e.__class__.__name__}: {e}")
     if timed_out:
@@ -962,16 +962,16 @@ if ($h -eq [IntPtr]::Zero -and "__TARGET__" -ne "") {
       } catch { }
     }
   }
-  if ($did -eq "") { $h = [CtfWin32]::Find("__WINDOW__", "__TARGET__") }
+  if ($did -eq "") { $h = [VmWin32]::Find("__WINDOW__", "__TARGET__") }
 }
 if ($did -eq "" -and $h -ne [IntPtr]::Zero) {
-  Write-Output ("TARGET_W32 " + [CtfWin32]::Line($h, "W32").Trim())
-  $cls = [CtfWin32]::Cls($h)
-  if ($cls -match "(?i)button") { [CtfWin32]::BmClick($h); $did = "CLICKED_BM_CLICK" }
-  else { [CtfWin32]::ClickCentre($h); $did = "CLICKED_MOUSE_ON_CONTROL" }
+  Write-Output ("TARGET_W32 " + [VmWin32]::Line($h, "W32").Trim())
+  $cls = [VmWin32]::Cls($h)
+  if ($cls -match "(?i)button") { [VmWin32]::BmClick($h); $did = "CLICKED_BM_CLICK" }
+  else { [VmWin32]::ClickCentre($h); $did = "CLICKED_MOUSE_ON_CONTROL" }
 }
 if ($did -eq "" -and "__XY__" -ne "") {
-  [CtfWin32]::Click(__X__, __Y__); $did = "CLICKED_MOUSE_AT___X__,__Y__"
+  [VmWin32]::Click(__X__, __Y__); $did = "CLICKED_MOUSE_AT___X__,__Y__"
 }
 if ($did -eq "") { Write-Output "NOT_FOUND" } else { Write-Output $did }
 Start-Sleep -Seconds __AFTER__
@@ -985,7 +985,7 @@ Start-Sleep -Seconds __AFTER__
     try:
         text, timed_out = remote.run_in_session1(act + _PS_LIST_WINDOWS,
                                                  timeout=int(timeout),
-                                                 task="ctfbrain_uiclick")
+                                                 task="dualvm_uiclick")
     except Exception as e:  # noqa: BLE001
         return VMResult(False, f"win_ui_click failed: {e.__class__.__name__}: {e}")
     if timed_out:
@@ -1042,16 +1042,16 @@ if ($h -eq [IntPtr]::Zero -and "__TARGET__" -ne "") {
     } catch { }
     if ($did -eq "") { try { $el.SetFocus(); Start-Sleep -Milliseconds 250 } catch { } }
   }
-  if ($did -eq "") { $h = [CtfWin32]::Find("__WINDOW__", "__TARGET__") }
+  if ($did -eq "") { $h = [VmWin32]::Find("__WINDOW__", "__TARGET__") }
 }
 if ($did -eq "" -and $h -ne [IntPtr]::Zero) {
-  Write-Output ("TARGET_W32 " + [CtfWin32]::Line($h, "W32").Trim())
-  [CtfWin32]::SetText($h, "__VAL__")
-  $back = [CtfWin32]::Txt($h)
+  Write-Output ("TARGET_W32 " + [VmWin32]::Line($h, "W32").Trim())
+  [VmWin32]::SetText($h, "__VAL__")
+  $back = [VmWin32]::Txt($h)
   Write-Output ("READBACK='" + $back + "'")
   if ($back -eq "__VAL__") { $did = "TYPED_WM_SETTEXT" }
   else {
-    [CtfWin32]::ClickCentre($h); Start-Sleep -Milliseconds 200
+    [VmWin32]::ClickCentre($h); Start-Sleep -Milliseconds 200
     [System.Windows.Forms.SendKeys]::SendWait("__KEYS__")
     $did = "TYPED_SENDKEYS_AFTER_WM_SETTEXT_FAILED"
   }
@@ -1062,7 +1062,7 @@ if ($did -eq "") {
 }
 Write-Output $did
 if (__ENTER__) {
-  if ($h -ne [IntPtr]::Zero) { [CtfWin32]::SetForegroundWindow($h) | Out-Null; [CtfWin32]::SetFocus($h) | Out-Null }
+  if ($h -ne [IntPtr]::Zero) { [VmWin32]::SetForegroundWindow($h) | Out-Null; [VmWin32]::SetFocus($h) | Out-Null }
   [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
   Write-Output "PRESSED_ENTER"
 }
@@ -1076,7 +1076,7 @@ Start-Sleep -Seconds __AFTER__
     try:
         out, timed_out = remote.run_in_session1(body + _PS_LIST_WINDOWS,
                                                 timeout=int(timeout),
-                                                task="ctfbrain_uitype")
+                                                task="dualvm_uitype")
     except Exception as e:  # noqa: BLE001
         return VMResult(False, f"win_ui_type failed: {e.__class__.__name__}: {e}")
     if timed_out:
@@ -1116,7 +1116,7 @@ if ("__WINDOW__" -ne "") {
   if ($tops.Count -gt 0) {
     try {
       $hwnd = [IntPtr]$tops[0].Current.NativeWindowHandle
-      [CtfWin32]::SetForegroundWindow($hwnd) | Out-Null
+      [VmWin32]::SetForegroundWindow($hwnd) | Out-Null
       Start-Sleep -Milliseconds 250
       $foc = "FOCUSED '" + $tops[0].Current.Name + "'"
     } catch { $foc = "FOCUS_FAILED " + $_.Exception.Message }
@@ -1133,7 +1133,7 @@ Start-Sleep -Seconds __AFTER__
                 .replace("__AFTER__", str(int(after))))
     try:
         out, timed_out = remote.run_in_session1(body + _PS_LIST_WINDOWS,
-                                                timeout=int(timeout), task="ctfbrain_key")
+                                                timeout=int(timeout), task="dualvm_key")
     except Exception as e:  # noqa: BLE001
         return VMResult(False, f"win_key failed: {e.__class__.__name__}: {e}")
     if timed_out:
@@ -1279,7 +1279,7 @@ if ($tops.Count -eq 0) { Write-Output "NO_WINDOW_MATCHED" } else {
    .replace("__LIM__", str(int(limit)))
     try:
         text, timed_out = remote.run_in_session1(body, timeout=int(timeout),
-                                                 task="ctfbrain_uiseq")
+                                                 task="dualvm_uiseq")
     except Exception as e:  # noqa: BLE001
         return VMResult(False, f"win_ui_seq failed: {e.__class__.__name__}: {e}")
     if timed_out:

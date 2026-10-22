@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""dualvm.shell — tach tu ctf-brain tools.py (pre-split), verbatim.
+"""dualvm.shell — split from the original monorepo (verbatim).
 Xem TODO[coupling] cho cac cho can truyen tham so thay cho ws/reasoner."""
 import os, re, shlex, base64
 from . import remote, config
@@ -385,7 +385,7 @@ def run_script(script, host="kali", kind=None, timeout=20, python=None):
     name = f"_script.{exts[kind]}"
     remote.write_remote(f"samples/{name}", script, host=host)
     # The python3 interpreter is PER HOST. Until 2026-09-23 this always used
-    # remote.KALI_PYTHON (/home/vahpem/ctf-venv/bin/python3), bash-quoted, so
+    # remote.KALI_PYTHON (/home/vahpem/analysis-venv/bin/python3), bash-quoted, so
     # run_script(kind="python3", host="windows") asked cmd.exe to run a Linux path in
     # single quotes - it could never work.
     if host == "windows":

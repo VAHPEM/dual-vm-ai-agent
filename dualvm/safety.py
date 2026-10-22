@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""dualvm.safety — tach tu ctf-brain tools.py (pre-split), verbatim.
+"""dualvm.safety — split from the original monorepo (verbatim).
 Xem TODO[coupling] cho cac cho can truyen tham so thay cho ws/reasoner."""
 import re
 
