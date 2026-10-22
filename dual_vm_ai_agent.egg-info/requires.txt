@@ -1,6 +1,0 @@
-paramiko
-python-dotenv
-pillow
-
-[mcp]
-mcp>=1.2

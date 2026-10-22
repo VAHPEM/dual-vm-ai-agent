@@ -1,2 +1,0 @@
-[console_scripts]
-dualvm-mcp = dualvm.mcp_server:main
