@@ -107,10 +107,13 @@ All are `$0`, deterministic, and return raw output. Host is `"kali"` or `"window
 ## MCP server — expose the Muscle to any MCP client
 
 ```bash
-pip install "mcp>=1.2"
+pip install -e ".[mcp]"        # mcp >= 1.7; SDK 1.x (FastMCP) and 2.x (MCPServer) both work
 DUALVM_ENV=... DUALVM_SSH_KEY=... python -m dualvm.mcp_server      # stdio
 ```
 Each tool above is published as an MCP tool; screenshots come back as image content.
+Every tool declares all four MCP hints (readOnly / destructive / idempotent /
+openWorld): `read_file`, `win_windows`, `win_screenshot`, `win_ui_tree` are read-only;
+everything else is destructive. Keep this when adding a tool (`tests/` enforces it).
 See `dualvm/mcp_server.py`.
 
 ## Design invariants (do not break)
@@ -131,3 +134,5 @@ See `dualvm/mcp_server.py`.
 `dualvm/`: `remote.py` (SSH/SFTP pool), `shell.py` (run/read), `windows.py`,
 `linux.py`, `jobs.py`, `images.py`, `safety.py`, `_result.py` (`VMResult`,
 `set_matcher`), `config.py`, `mcp_server.py`.
+
+`tests/`: VM-free unit tests (`pytest`). License: Apache-2.0.

@@ -15,8 +15,22 @@ Brain is a separate concern, so the two can be reused independently.
 
 ```bash
 pip install -e .            # from a checkout
-# deps: paramiko, python-dotenv, pillow ; MCP server: pip install "mcp>=1.2"
+pip install -e ".[mcp]"     # + MCP server (mcp >= 1.7; SDK 1.x and 2.x both work)
+pip install -e ".[test]"    # + pytest
+# deps: paramiko, python-dotenv, pillow
 ```
+
+## Tests
+
+```bash
+pytest
+```
+
+The unit tests never contact a VM: they point `DUALVM_ENV` / `DUALVM_SSH_KEY` at
+paths that do not exist and monkeypatch the library calls. They cover the
+`dualvm.safety` command filter, the `VMResult` / `set_matcher` contract, and the
+MCP server (tool list, annotations, result conversion, and a real stdio
+`tools/list` round-trip). The MCP tests are skipped if `mcp` is not installed.
 
 ## Configure
 
@@ -116,7 +130,25 @@ python -m dualvm.mcp_server      # reads .env + .ssh_keys next to the package
 
 Each tool above is published as an MCP tool; screenshots come back as image content.
 
-## License / scope
+Every tool carries the four MCP behaviour hints (`readOnlyHint`, `destructiveHint`,
+`idempotentHint`, `openWorldHint`) so a client can auto-approve the observers and
+ask before the actors:
+
+| Kind | Tools | Hints |
+|---|---|---|
+| Observe | `read_file`, `win_windows`, `win_screenshot`, `win_ui_tree` | read-only, idempotent, closed-world |
+| Act | `run_cmd`, `run_script`, `job_start`, `win_gui_run`, `win_frida`, `win_ui_click`, `win_ui_type`, `win_key`, `win_ui_seq`, `linux_gui_run`, `linux_gdb` | destructive, open-world |
+| Act (bounded) | `job_poll` (can `stop` a job) | destructive, idempotent, closed-world |
+
+The hints are UI guidance for the client, not a security boundary — `dualvm.safety`
+is what refuses security-/system-config changes.
+
+## License
+
+Copyright 2026 Anh Ve Pham (VAHPEM). Licensed under the
+[Apache License, Version 2.0](LICENSE).
+
+## Scope
 
 Built for authorized reverse-engineering and security-analysis work on VMs you own. The command
 filter (`dualvm.safety`) refuses security-/system-config changes that are never

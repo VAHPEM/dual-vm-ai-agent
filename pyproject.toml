@@ -3,10 +3,19 @@ name = "dual-vm-ai-agent"
 version = "0.1.0"
 description = "The Muscle: deterministic control of a Kali + Windows VM over SSH (run, read, screenshot, Frida, gdb)."
 requires-python = ">=3.10"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "Anh Ve Pham (VAHPEM)" }]
 dependencies = ["paramiko", "python-dotenv", "pillow"]
 
 [project.optional-dependencies]
-mcp = ["mcp>=1.2"]
+# >=1.7: first release with tool annotations. <3: 1.x (FastMCP) and 2.x (MCPServer)
+# are both supported and tested; a future major version is not.
+mcp = ["mcp>=1.7,<3"]
+test = ["pytest"]
+
+[project.urls]
+Repository = "https://github.com/VAHPEM/dual-vm-ai-agent"
 
 [project.scripts]
 dualvm-mcp = "dualvm.mcp_server:main"
@@ -14,6 +23,10 @@ dualvm-mcp = "dualvm.mcp_server:main"
 [tool.setuptools]
 packages = ["dualvm"]
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
 [build-system]
-requires = ["setuptools>=68"]
+# >=77: PEP 639 SPDX `license` string + `license-files`.
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
