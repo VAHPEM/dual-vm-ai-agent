@@ -1,5 +1,7 @@
 # dual-vm-ai-agent (`dualvm`)
 
+[![M8ven Score](https://m8ven.ai/badge/mcp/vahpem-dual-vm-ai-agent-qnrny8?v=bb3a6a518833e8a41fd7bf0586362b17)](https://m8ven.ai/mcp/vahpem-dual-vm-ai-agent-qnrny8?s=readme)
+
 **The Muscle.** A deterministic, `$0` library that lets an AI (the Brain) *operate*
 two virtual machines — a Kali Linux VM and a Windows VM — over SSH: run commands,
 read output, drive GUIs, take and read screenshots, script a debugger (gdb / Frida),
