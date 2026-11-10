@@ -121,6 +121,11 @@ See `dualvm/mcp_server.py`.
 - **No interpretation.** Tools return raw output; the Brain concludes.
 - **Real, tree-killing timeouts** on both VMs — a killed call never leaves a process
   running on the VM.
+- **Windows background jobs are created through WMI** (`Win32_Process.Create`) and run
+  by a per-job launcher: a `Start-Process` child of the SSH session dies ~1 s after the
+  call returns, and a one-line `& echo %errorlevel%` is expanded before the command
+  runs (it logged `exit 3` as 0). `job_poll(stop=True)` kills the whole tree. Measured
+  2026-11-10; `tests/test_jobs.py`.
 - **Windows GUI work runs in the interactive session (session 1)** via a scheduled
   task; an SSH login lands in session 0 which has no visible desktop.
 - **Large output spills to a per-call file** on the VM; page it back with `read_file`.
