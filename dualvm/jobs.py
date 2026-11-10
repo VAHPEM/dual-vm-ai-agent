@@ -23,6 +23,51 @@ def _job_paths(name):
     return f"_job_{name}.log", f"_job_{name}.pid", f"_job_{name}.py"
 
 
+# Windows jobs are created through WMI (Win32_Process.Create), not Start-Process.
+# MEASURED 2026-11-10 (Windows 11 ARM64 VM): a Start-Process child of the SSH session was
+# killed ~1 s after job_start returned - `ping -n 8` logged one reply and no __JOB_RC, and
+# every python job left a 0-byte log; only instant commands (`echo hi`) looked fine. The
+# session's processes die with the SSH channel. A WMI-created process belongs to the WMI
+# service instead and ran `ping -n 8` to the end.
+# The launcher below runs the command line exactly as `cmd.exe /c` would (read from a FILE,
+# so there is no second quoting layer) and logs the command's REAL exit code. The old
+# one-liner `x > log & echo __JOB_RC=%errorlevel%` expands %errorlevel% when cmd PARSES
+# the line, i.e. before x runs: measured, `cmd /c exit 3` was logged as __JOB_RC=0.
+_WIN_JOB_LAUNCHER = r"""# -*- coding: utf-8 -*-
+import os, subprocess, sys
+here = os.path.dirname(os.path.abspath(__file__))
+name = sys.argv[1]
+cmdline = open(os.path.join(here, "_job_%s_cmd.txt" % name), encoding="utf-8").read().strip()
+env = dict(os.environ, PYTHONUNBUFFERED="1", PYTHONIOENCODING="utf-8")
+with open(os.path.join(here, "_job_%s.log" % name), "wb", buffering=0) as log:
+    try:
+        p = subprocess.Popen(cmdline, shell=True, cwd=here, env=env, stdout=log,
+                             stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL)
+        rc = p.wait()
+    except Exception as e:
+        log.write(("job launcher: %s: %s\n" % (type(e).__name__, e)).encode("utf-8"))
+        rc = 255
+    log.write(("__JOB_RC=%d\n" % (rc & 0xFFFFFFFF)).encode("ascii"))
+"""
+
+
+def _ps_quote(s):
+    """A PowerShell single-quoted literal (the only escape inside one is '' for ')."""
+    return "'" + str(s).replace("'", "''") + "'"
+
+
+def _win_job_alive_ps(nm):
+    """PowerShell that sets $pid0 / $alive. A pid alone is not enough: once the job ends its
+    pid can be reused, and `stop` would then kill an unrelated process tree. Alive means the
+    process with that pid is THIS job's launcher (its command line names the job's file)."""
+    marker = f"_job_{nm}_launch.py"
+    return (f'  $pid0 = (Get-Content "_job_{nm}.pid" -ErrorAction SilentlyContinue | Select-Object -First 1)\n'
+            f'  $alive = $false\n'
+            f'  if ($pid0) {{ $pr = Get-CimInstance Win32_Process -Filter ("ProcessId=" + [int]$pid0) '
+            f'-ErrorAction SilentlyContinue\n'
+            f'    $alive = [bool]($pr -and $pr.CommandLine -and $pr.CommandLine.Contains({_ps_quote(marker)})) }}')
+
+
 def job_start(name, command=None, script=None, host="kali", python=None, truncated=False):
     nm = str(name or "").strip()
     if not _JOB_NAME_RE.match(nm):
@@ -55,15 +100,20 @@ def job_start(name, command=None, script=None, host="kali", python=None, truncat
     if host == "windows":
         interp = python or remote.WIN_PYTHON_EXE
         inner = (f'"{interp}" -u {pyf}' if script else command)
+        samples = remote.win_samples()
+        launch = f"_job_{nm}_launch.py"          # per job: two starts never share a file
+        cmdline = f'"{remote.WIN_PYTHON_EXE}" -u "{samples}\\{launch}" {nm}'
         ps = (f'$ErrorActionPreference="Continue"\n'
-              f'Set-Location "{remote.win_samples()}"\n'
+              f'Set-Location "{samples}"\n'
               f'Remove-Item -Force -ErrorAction SilentlyContinue "{log}","{pidf}"\n'
-              f'$p = Start-Process -FilePath "cmd.exe" -ArgumentList '
-              f'\'/c {inner} > {log} 2>&1 & echo __JOB_RC=%errorlevel% >> {log}\' '
-              f'-WindowStyle Hidden -PassThru\n'
-              f'$p.Id | Out-File -Encoding ascii "{pidf}"\n'
-              f'Write-Output ("JOB_PID=" + $p.Id)\n')
+              f'$r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments '
+              f'@{{CommandLine = {_ps_quote(cmdline)}; CurrentDirectory = {_ps_quote(samples)}}}\n'
+              f'if ($r.ReturnValue -ne 0) {{ Write-Output ("JOB_CREATE_FAILED=" + $r.ReturnValue) }}\n'
+              f'else {{ $r.ProcessId | Out-File -Encoding ascii "{pidf}"\n'
+              f'       Write-Output ("JOB_PID=" + $r.ProcessId) }}\n')
         try:
+            remote.write_remote(f"samples/_job_{nm}_cmd.txt", inner, host="windows")
+            remote.write_remote(f"samples/{launch}", _WIN_JOB_LAUNCHER, host="windows")
             remote.write_remote(f"samples/_job_{nm}_start.ps1", ps, host="windows")
             o, e = remote.ssh_exec(
                 f'powershell -NoProfile -ExecutionPolicy Bypass -File '
@@ -120,17 +170,20 @@ def job_poll(name=None, tail=40, grep=None, stop=False, host="kali"):
     n = max(1, int(tail))
 
     if host == "windows":
+        # NO_SUCH_JOB keys on the pid file: the launcher creates the log only once it runs,
+        # so a job polled in its first instant has a pid file but no log yet
         ps = [f'Set-Location "{remote.win_samples()}"',
-              f'if (-not (Test-Path "{log}")) {{ Write-Output "NO_SUCH_JOB" }} else {{',
-              f'  $pid0 = (Get-Content "{pidf}" -ErrorAction SilentlyContinue | Select-Object -First 1)',
-              f'  $alive = $false',
-              f'  if ($pid0) {{ $alive = [bool](Get-Process -Id $pid0 -ErrorAction SilentlyContinue) }}']
+              f'if (-not (Test-Path "{pidf}") -and -not (Test-Path "{log}")) {{ Write-Output "NO_SUCH_JOB" }} else {{',
+              _win_job_alive_ps(nm)]
         if stop:
-            ps.append('  if ($alive) { Stop-Process -Id $pid0 -Force -ErrorAction SilentlyContinue; '
+            # /T: the launcher -> cmd.exe -> the command's own children; Stop-Process killed
+            # only the top process and left the real work running
+            ps.append('  if ($alive) { & taskkill.exe /T /F /PID $pid0 2>&1 | Out-Null; '
                       'Write-Output "STOPPED"; $alive = $false }')
         ps += ['  Write-Output ("STATE=" + $(if ($alive) {"RUNNING"} else {"FINISHED"}))',
-               f'  Write-Output ("SIZE=" + (Get-Item "{log}").Length)',
-               f'  $c = Get-Content "{log}"',
+               f'  $c = @()',
+               f'  if (Test-Path "{log}") {{ Write-Output ("SIZE=" + (Get-Item "{log}").Length); '
+               f'$c = @(Get-Content "{log}") }} else {{ Write-Output "SIZE=0" }}',
                '  Write-Output ("LINES=" + $c.Count)',
                '  $rc = $c | Select-String "__JOB_RC=" | Select-Object -Last 1',
                '  if ($rc) { Write-Output ("EXIT " + $rc.Line.Trim()) }']
