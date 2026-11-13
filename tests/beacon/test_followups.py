@@ -617,3 +617,12 @@ def test_a_closed_run_with_something_for_the_human_is_awaiting_human(make_run):
     L.propose_problem("Add a regression test for the error path", "a missing input must give rc=1, seen in P1")
     d = stop(L, "All done; P2 waits for you.")
     assert d.action == "allow" and d.why == "awaiting_human"
+
+
+
+def test_a_problem_whose_note_says_do_not_ask_gets_no_question_to_the_human():
+    """Measured 2026-11-13 (run 4, unattended): P3's note said "the human is away: do not ask them"; the worker obeyed,
+    but the follow-up reader turned its closing remark into question #1 and the run stopped on it."""
+    from beacon import classify
+    assert "said not to ask them about a problem" in followups.SYSTEM and "make no needs_human item" in followups.SYSTEM
+    assert "said not to ask them about the problem in hand" in classify.SYSTEM and "it is never need_info" in classify.SYSTEM
