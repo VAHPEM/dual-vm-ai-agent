@@ -23,7 +23,7 @@ EXPECTED_TOOLS = {
     "run_cmd", "run_script", "read_file", "job_start", "job_poll",
     "win_windows", "win_screenshot", "win_gui_run", "win_frida", "win_ui_tree",
     "win_ui_click", "win_ui_type", "win_key", "win_ui_seq",
-    "linux_gui_run", "linux_gdb",
+    "linux_gui_run", "linux_gdb", "upload_file",
 }
 READ_ONLY = {"read_file", "win_windows", "win_screenshot", "win_ui_tree"}
 HINTS = ("readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint")
@@ -220,3 +220,14 @@ def test_stdio_tools_list_carries_annotations():
         ann = tool.get("annotations") or {}
         for hint in HINTS:
             assert isinstance(ann.get(hint), bool), f"{name}.{hint} missing on the wire"
+
+
+def test_upload_file_is_published_closed_world_and_passes_arguments(monkeypatch):
+    ann = _tools()["upload_file"].annotations
+    assert _attr(ann, "destructiveHint") is True and _attr(ann, "openWorldHint") is False
+    assert _attr(ann, "idempotentHint") is True
+    seen = {}
+    monkeypatch.setattr(shell, "upload_file", lambda local_path, name=None, host="kali":
+                        (seen.update(local_path=local_path, name=name, host=host), VMResult(True, "uploaded"))[1])
+    asyncio.run(mcp_server.mcp.call_tool("upload_file", {"local_path": "/tmp/a.diff", "name": None, "host": "kali"}))
+    assert seen == {"local_path": "/tmp/a.diff", "name": None, "host": "kali"}

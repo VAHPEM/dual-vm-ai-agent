@@ -151,9 +151,13 @@ def _wrap_cmd(command, host, timeout=20):
     # because 11 characters of output is below INFO_MIN_CHARS. One shell snapshot
     # fixes both: the Brain learns where its output went, and producing a file now
     # counts as the progress it plainly is.
-    snap = "find . -maxdepth 1 -type f -printf '%f\\t%s\\n' 2>/dev/null | sort"
+    # samples/ is snapshotted by its absolute path: a command that cd's away (`cd /tmp/x && git clone ...`)
+    # would otherwise have its new working dir listed as "files written in samples/" (measured 2026-11-13:
+    # every run_cmd that cd'd into a fresh clone reported README.md, CLAUDE.md, ... as new in samples/).
+    snap = "find \"$__dvm_dir\" -maxdepth 1 -type f -printf '%f\\t%s\\n' 2>/dev/null | sort"
     inner = (
         "cd samples 2>/dev/null\n"
+        "__dvm_dir=$(pwd)\n"
         "set -o pipefail\n"
         f"{snap} > /tmp/_pre.$$ 2>/dev/null\n"
         + command + "\n"
@@ -360,6 +364,39 @@ def _run_and_wrap(command, host, timeout, label, grep_shape=None):
         flag=flag,
         info=sl,
     )
+
+
+MAX_UPLOAD = 200 * 1024 * 1024
+
+
+def upload_file(local_path, name=None, host="kali"):
+    """Copy a file from the machine running dualvm into a VM's samples/ dir (the working dir of run_cmd /
+    run_script). `name` is the path inside samples/ (may hold sub-dirs, e.g. 'data/x.bin'); default: the file's
+    own name. The library always had this (remote.upload, used inside jobs and Frida), but no tool exposed it:
+    measured 2026-11-13, a worker that needed a 7 KB diff on Kali concluded "dualvm has no upload" and rebuilt
+    the files from a GitHub clone instead. -> VMResult; nothing is interpreted."""
+    if host not in ("kali", "windows"):
+        return VMResult(False, f"upload_file: host must be 'kali' or 'windows', not {host!r}")
+    src = os.path.expanduser(str(local_path or ""))
+    if not os.path.isfile(src):
+        return VMResult(False, f"upload_file: no such local file: {local_path}")
+    rel = str(name or os.path.basename(src)).replace("\\", "/").strip()
+    parts = [p for p in rel.split("/") if p not in ("", ".")]
+    if not parts or rel.startswith("/") or ".." in parts or re.match(r"^[A-Za-z]:", rel):
+        return VMResult(False, "upload_file: `name` must be a relative path inside samples/ "
+                               "(no '..', no absolute or drive path)")
+    size = os.path.getsize(src)
+    if size > MAX_UPLOAD:
+        return VMResult(False, f"upload_file: {size} bytes is over the {MAX_UPLOAD}-byte limit")
+    dest = "/".join(parts)
+    try:
+        remote_path = remote.upload(src, dest, host=host)
+    except Exception as e:  # noqa: BLE001 - raw failure back to the caller
+        return VMResult(False, f"upload_file: upload to {host} failed: {e}")
+    return VMResult(True, f"uploaded {local_path} -> {host}:{remote_path} ({size} bytes)",
+                    detail=f"On {host} it is samples/{dest}: run_cmd / run_script start in samples/, "
+                           f"so refer to it as {dest}.",
+                    known=[f"{host}:samples/{dest} = {os.path.basename(src)} ({size} bytes)"])
 
 
 def run_cmd(command, host="kali", timeout=20):

@@ -97,6 +97,14 @@ def run_script(script: str, host: str = "kali", kind: str | None = None,
                                   python=python))
 
 
+@mcp.tool(annotations=_act("Upload a local file to a VM", idempotent=True, open_world=False))
+def upload_file(local_path: str, name: str | None = None, host: str = "kali"):
+    """Copy a file from this machine (where the dualvm MCP server runs) into the VM's samples/ dir, the
+    working dir of run_cmd and run_script. `name` is the path inside samples/ (sub-dirs allowed); default:
+    the file's own name. An existing file of that name is replaced."""
+    return _emit(shell.upload_file(local_path, name=name, host=host))
+
+
 @mcp.tool(annotations=_observe("Read file on a VM"))
 def read_file(path: str, offset: int = 0, length: int = 4000, host: str = "kali"):
     """Read a byte slice of a file that lives on a VM (pages large files)."""
