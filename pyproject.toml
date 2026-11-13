@@ -19,9 +19,11 @@ Repository = "https://github.com/VAHPEM/dual-vm-ai-agent"
 
 [project.scripts]
 dualvm-mcp = "dualvm.mcp_server:main"
+beacon = "beacon.cli:main"
+beacon-mcp = "beacon.mcp_server:main"
 
 [tool.setuptools]
-packages = ["dualvm"]
+packages = ["dualvm", "beacon"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
