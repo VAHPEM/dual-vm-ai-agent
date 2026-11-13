@@ -173,8 +173,16 @@ def backoff(kind, attempt, reset_at=0.0, now=None):
 class CliRunner:
     """One headless Claude Code session per run() call."""
 
+    # After the Stop gate lets a headless session stop, Claude Code should exit at once. A background task keeps
+    # it alive and wakes it with each "<task-notification>" (measured 2026-11-13: after soft_budget at 12:29 a
+    # `find /` the worker had started kept the session running turns until 12:59). That is not a time limit on
+    # the work: the gate already ended it. After this grace the session is stopped.
+    END_GRACE_S = 120
+    POLL_S = 2.0
+
     def __init__(self, cwd, run, claude="claude", permission_mode=None, no_prompts=False, model=None,
-                 max_budget_usd=None, timeout_s=None, extra_args=(), beacon_env=True):
+                 max_budget_usd=None, timeout_s=None, extra_args=(), beacon_env=True, end_grace_s=None):
+        self.end_grace_s = self.END_GRACE_S if end_grace_s is None else float(end_grace_s)
         self.cwd, self.run_dir, self.claude, self.beacon_env = cwd, run, claude, beacon_env
         self.permission_mode, self.no_prompts, self.model = permission_mode, no_prompts, model
         self.max_budget_usd, self.timeout_s, self.extra_args = max_budget_usd, timeout_s, list(extra_args)
@@ -242,11 +250,7 @@ class CliRunner:
                                          start_new_session=True)
             t = threading.Thread(target=reader, args=(self.proc.stdout, log), daemon=True)
             t.start()
-            try:
-                self.proc.wait(timeout=self.timeout_s)
-            except subprocess.TimeoutExpired:
-                timed_out = True
-                self.stop()
+            timed_out, gate_ended = self._wait(found)
             t.join(10)
             code = self.proc.returncode
             self.proc = None
@@ -256,7 +260,10 @@ class CliRunner:
         except OSError:
             stderr_tail = ""
         res = found["result"]
-        kind = classify_end(res, found["retries"], code, stderr_tail, timed_out)
+        kind = "" if gate_ended else classify_end(res, found["retries"], code, stderr_tail, timed_out)
+        if gate_ended:
+            found["notices"].append(f"beacon: the Stop gate had let this session stop; it was still running "
+                                    f"{self.end_grace_s:.0f} s later (background work), so beacon ended it")
         text = (res or {}).get("result") or stderr_tail
         return SessionResult(
             session_id=found["session_id"] or (res or {}).get("session_id", ""), exit_code=code if code is not None else -1,
@@ -265,6 +272,33 @@ class CliRunner:
             num_turns=int((res or {}).get("num_turns") or 0), text=str(text)[-2000:],
             reset_at=parse_reset(text) if kind == "rate_limit" else 0.0, api_retries=len(found["retries"]),
             notices=found["notices"][:20], credential_expires_at=_epoch(found["expires"]))
+
+    def _wait(self, found):
+        """Wait for the session; -> (timed_out, gate_ended). Stops it on timeout_s (if set), or END_GRACE_S after
+        the gate's latest "allow" for this session if it has not exited by then."""
+        deadline = None if self.timeout_s is None else time.monotonic() + float(self.timeout_s)
+        path = os.path.join(self.run_dir, "decisions.jsonl")
+        try:
+            offset = os.path.getsize(path)
+        except OSError:
+            offset = 0
+        allowed_at = None
+        while True:
+            try:
+                self.proc.wait(timeout=self.POLL_S)
+                return False, False
+            except subprocess.TimeoutExpired:
+                pass
+            now = time.monotonic()
+            if deadline is not None and now >= deadline:
+                self.stop()
+                return True, False
+            offset, allowed = _new_allow(path, offset, found.get("session_id") or "")
+            if allowed:
+                allowed_at = now                    # the latest allow counts: each wake-up gets the full grace
+            if allowed_at is not None and now - allowed_at >= self.end_grace_s:
+                self.stop()
+                return False, True
 
     def stop(self):
         """SIGINT first (Claude Code ends the turn cleanly), then SIGTERM, then SIGKILL."""
@@ -289,6 +323,26 @@ class CliRunner:
         except OSError:
             p.kill()
         p.wait()
+
+
+def _new_allow(path, offset, session_id):
+    """Read decisions.jsonl from `offset`: -> (new offset, did the gate let `session_id` stop?)."""
+    try:
+        with open(path, "rb") as fh:
+            fh.seek(offset)
+            data = fh.read()
+    except OSError:
+        return offset, False
+    end = data.rfind(b"\n") + 1                 # a half-written last line is read next time
+    allowed = False
+    for line in data[:end].splitlines():
+        try:
+            d = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(d, dict) and d.get("action") == "allow" and (not session_id or d.get("session") == session_id):
+            allowed = True
+    return offset + end, allowed
 
 
 def _last_gate(L, since_seq):

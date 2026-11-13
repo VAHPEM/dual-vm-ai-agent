@@ -179,6 +179,12 @@ FAKE_CLAUDE = textwrap.dedent('''\
         sys.exit(1)
     elif mode == "hang":
         time.sleep(60)
+    elif mode == "linger":   # the gate let it stop, but a background task keeps the session alive
+        emit({"type": "result", "subtype": "success", "is_error": False, "session_id": "sess-123",
+              "total_cost_usd": 0.3, "num_turns": 6, "result": "stopping"})
+        with open(os.path.join(os.environ["BEACON_RUN"], "decisions.jsonl"), "a", encoding="utf-8") as fh:
+            fh.write(json.dumps({"action": "allow", "why": "soft_budget", "session": "sess-123"}) + "\\n")
+        time.sleep(60)
 ''')
 
 
@@ -264,3 +270,23 @@ def test_cli_watch_defaults_set_no_limit():
     a = build_parser().parse_args(["watch", "--cwd", "."])
     assert (a.max_hours, a.max_cost_usd, a.max_wait_hours, a.session_budget_usd, a.session_timeout_min) == \
         (None, None, None, None, None)
+
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX process groups")
+def test_a_session_the_gate_let_stop_is_ended_if_background_work_keeps_it_alive(make_run, fake_claude, tmp_path,
+                                                                                 monkeypatch):
+    """Measured 2026-11-13: after soft_budget a `find /` the worker had started kept the headless session running
+    turns for 30 minutes. With no time limit set, the runner now ends it a grace period after the gate's allow,
+    and reports a clean end (the gate decided), not a crash to retry."""
+    L = make_run()
+    with open(os.path.join(L.dir, "decisions.jsonl"), "a", encoding="utf-8") as fh:   # an earlier allow: ignored
+        fh.write(json.dumps({"action": "allow", "why": "rotate", "session": "sess-123"}) + "\n")
+    monkeypatch.setenv("FAKE_OUT", str(tmp_path / "seen.json"))
+    monkeypatch.setenv("FAKE_MODE", "linger")
+    t0 = time.time()
+    res = CliRunner(cwd=str(tmp_path), run=L.dir, claude=fake_claude, end_grace_s=1).run(FRESH_PROMPT)
+    assert time.time() - t0 < 40 and res.error_kind == "" and res.session_id == "sess-123"
+    assert any("beacon ended it" in n for n in res.notices)
+    monkeypatch.setenv("FAKE_MODE", "ok")                      # an ordinary session is not touched
+    assert CliRunner(cwd=str(tmp_path), run=L.dir, claude=fake_claude, end_grace_s=1).run(FRESH_PROMPT).notices == []
