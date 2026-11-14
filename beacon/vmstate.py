@@ -6,11 +6,11 @@ a process left behind by an earlier attempt, a port still bound, or a modified
 file in samples/ makes the next approach fail for reasons that have nothing to do
 with the approach. The lighthouse cannot see that unless it is recorded.
 
-`fingerprint(host)` reads, through dualvm (read-only commands, the samples/
-working directory dualvm already uses):
+`fingerprint(host)` reads, through labhand (read-only commands, the samples/
+working directory labhand already uses):
   * the set of running process names (kernel threads and our own probe filtered out),
   * the listening TCP ports,
-  * a digest of the samples/ tree (path, size, mtime), excluding dualvm's own
+  * a digest of the samples/ tree (path, size, mtime), excluding labhand's own
     bookkeeping files (names starting with "_": _script.*, spill files, screenshots).
 `diff(baseline, now)` says what changed. The beacon MCP tool `vm_check` stores the
 baseline in the ledger and attaches each check as evidence, so a dead end can carry
@@ -47,9 +47,10 @@ class VMStateError(Exception):
     pass
 
 
-def dualvm_runner(script, host, kind):
-    """Default runner: dualvm.shell.run_script (imported lazily; needs the lab)."""
-    from dualvm import shell
+def labhand_runner(script, host, kind):
+    """Default runner: labhand.shell.run_script (imported lazily; needs the lab). No dualvm
+    fallback: dualvm is a shim over labhand, so it fails whenever labhand does."""
+    from labhand import shell
     r = shell.run_script(script, host=host, kind=kind, timeout=60)
     return bool(r.ok), r.detail or r.summary or ""
 
@@ -76,7 +77,7 @@ def parse(text, host):
 def fingerprint(host, runner=None):
     if host not in ("kali", "windows"):
         raise VMStateError("host must be kali or windows")
-    runner = runner or dualvm_runner
+    runner = runner or labhand_runner
     script, kind = (KALI_PROBE, "bash") if host == "kali" else (WIN_PROBE, "powershell")
     ok, text = runner(script, host, kind)
     if not ok:

@@ -1,22 +1,25 @@
-# CLAUDE.md — dual-vm-ai-agent (`dualvm`)
+# CLAUDE.md — labhand
 
 > Read this first. It is the authoritative, stable entry point for any AI working
-> with this repo: what the package is, how to drive the two VMs, and the full list
+> with this repo: what the package is, how to drive the lab machines, and the full list
 > of tools available (run commands, read output, screenshots, GUI automation, Frida,
-> gdb, background jobs). Prefer reading this one file over re-reading all of `dualvm/`.
+> gdb, background jobs). Prefer reading this one file over re-reading all of `labhand/`.
 
 ## What this is
 
 **The Muscle.** A deterministic, `$0` Python library (no model calls) that lets an AI
-**operate** two virtual machines — a **Kali Linux** VM and a **Windows** VM — over SSH.
+**operate** the machines of a lab over SSH — today a **Kali Linux** VM and a **Windows** VM,
+more hosts later (see the host inventory below). The checkout is called `labhand/`
+here; the folder and the GitHub repo keep their old name `dual-vm-ai-agent`.
 Every function runs something on a VM and returns the **raw** output as a plain
 `VMResult`. It **never interprets** results and has no concept of "flag", "challenge"
 or "task". The deciding Brain lives elsewhere — any agent that imports this package.
 
 ## Configure (once)
 
-`dualvm` reads, by default, a `.env` and `.ssh_keys/` **next to the package**
-(repo root). Override with env vars `DUALVM_ENV` / `DUALVM_SSH_KEY`.
+`labhand` reads, by default, a `.env` and `.ssh_keys/` **next to the package**
+(repo root). Override with env vars `LABHAND_ENV` / `LABHAND_SSH_KEY` (the pre-rename
+`DUALVM_ENV` / `DUALVM_SSH_KEY` still work as a fallback).
 
 - `.env` keys used: `KALI_HOST`, `KALI_USER`, `WIN_HOST`, `WIN_USER`, and optionally
   `WIN_PYTHON_EXE`, `KALI_PYTHON`.
@@ -26,8 +29,8 @@ or "task". The deciding Brain lives elsewhere — any agent that imports this pa
 ## Use it (for an AI)
 
 ```python
-import dualvm
-from dualvm import shell, windows, linux, jobs
+import labhand
+from labhand import shell, windows, linux, jobs
 
 r = shell.run_cmd("uname -a")          # -> VMResult
 print(r.ok, r.summary, r.detail)
@@ -54,8 +57,8 @@ windows.win_windows(match="Error")     # read the Windows desktop as text (cheap
 The library does not know what a flag is. A Brain that cares teaches it once:
 
 ```python
-import re, dualvm
-dualvm.set_matcher(lambda t: (re.search(r"...@flare-on\.com", t) or [None])[0])
+import re, labhand
+labhand.set_matcher(lambda t: (re.search(r"...@flare-on\.com", t) or [None])[0])
 ```
 
 Afterwards tools fill `VMResult.flag` when the pattern appears in raw output.
@@ -64,21 +67,21 @@ Afterwards tools fill `VMResult.flag` when the pattern appears in raw output.
 
 All are `$0`, deterministic, and return raw output. Host is `"kali"` or `"windows"`.
 
-### Run commands & read output — `dualvm.shell`
+### Run commands & read output — `labhand.shell`
 | call | does |
 |---|---|
 | `run_cmd(command, host="kali", timeout=20)` | run one shell line in `samples/` (kali=bash, windows=cmd.exe); raw output. Real tree-killing timeout. |
 | `run_script(script, host="kali", kind=None, timeout=20, python=None)` | write & run a multi-line script (`kind`: bash/python3 on kali; powershell/cmd on windows). |
 | `read_file(path, offset=0, length=4000, host="kali", pinned_docs=())` | page a file on a VM; if not on `host` but on the other VM, serves it from there. |
 
-### Windows desktop — read / see / run — `dualvm.windows`
+### Windows desktop — read / see / run — `labhand.windows`
 | call | does |
 |---|---|
 | `win_windows(match=None, timeout=40)` | list open windows (process, title, UI-Automation class/control type) as **text** — the cheap way to read a GUI; pass `match` to dump one window's inner text. |
 | `win_screenshot(timeout=40)` | capture the interactive desktop as an **image** (`r.image`). |
 | `win_gui_run(program, args="", wait=6, kill=True, screenshot=True, timeout=60)` | run a program on the real desktop, wait, report windows + screenshot. |
 
-### Windows GUI automation (act, not just look) — `dualvm.windows`
+### Windows GUI automation (act, not just look) — `labhand.windows`
 | call | does |
 |---|---|
 | `win_ui_tree(match=None, limit=250, timeout=45)` | dump the control tree (UI Automation + Win32) of a window. |
@@ -87,18 +90,18 @@ All are `$0`, deterministic, and return raw output. Host is `"kali"` or `"window
 | `win_key(keys, window=None, after=1, timeout=45)` | send keystrokes (SendKeys syntax). |
 | `win_ui_seq(clicks, window=None, pause=250, after=2, limit=250, timeout=120)` | click a sequence of named controls in one pass. |
 
-### Windows instrumentation — `dualvm.windows`
+### Windows instrumentation — `labhand.windows`
 | call | does |
 |---|---|
 | `win_frida(script, program=None, pid=None, args="", wait=8, kill=True, desktop=False, max_lines=800, timeout=90, drive=None, launch=None, bat_text="", bat_names=())` | run a **Frida** JavaScript hook: spawn by `program`, attach by `pid`, or `launch` a `.bat` GUI app; returns every `send()`/`log()` line. `drive=` presses UI buttons while hooked. |
 
-### Linux — headless GUI & debugger — `dualvm.linux`
+### Linux — headless GUI & debugger — `labhand.linux`
 | call | does |
 |---|---|
 | `linux_gui_run(command, wait=5, screen="1280x800x24", timeout=60)` | run a GUI program on Kali under **Xvfb** and return a screenshot. |
 | `linux_gdb(prog, script, args="", gui=True, screen="1280x800x24", max_lines=800, timeout=120)` | run a **gdb-python** script against an ELF (ASLR off, PIE base fixed at `0x555555554000`); returns whatever it `log()`s. Helpers injected: `rd/wr/u64/u32/f64/reg/cstr/at/hook/starti/cont/run`. |
 
-### Background jobs — `dualvm.jobs`
+### Background jobs — `labhand.jobs`
 | call | does |
 |---|---|
 | `job_start(name, command=None, script=None, host="kali", python=None, truncated=False)` | start work in the background, return immediately with a pid. |
@@ -108,18 +111,18 @@ All are `$0`, deterministic, and return raw output. Host is `"kali"` or `"window
 
 ```bash
 pip install -e ".[mcp]"        # mcp >= 1.7; SDK 1.x (FastMCP) and 2.x (MCPServer) both work
-DUALVM_ENV=... DUALVM_SSH_KEY=... python -m dualvm.mcp_server      # stdio
+LABHAND_ENV=... LABHAND_SSH_KEY=... labhand-mcp      # stdio; = python -m labhand.mcp_server
 ```
 Each tool above is published as an MCP tool; screenshots come back as image content.
 Every tool declares all four MCP hints (readOnly / destructive / idempotent /
 openWorld): `read_file`, `win_windows`, `win_screenshot`, `win_ui_tree` are read-only;
 everything else is destructive. Keep this when adding a tool (`tests/` enforces it).
-See `dualvm/mcp_server.py`.
+The server registers as `labhand`. See `labhand/mcp_server.py`.
 
 ## Design invariants (do not break)
 
 - **No interpretation.** Tools return raw output; the Brain concludes.
-- **Real, tree-killing timeouts** on both VMs — a killed call never leaves a process
+- **Real, tree-killing timeouts** on every host — a killed call never leaves a process
   running on the VM.
 - **Windows background jobs are created through WMI** (`Win32_Process.Create`) and run
   by a per-job launcher: a `Start-Process` child of the SSH session dies ~1 s after the
@@ -131,13 +134,23 @@ See `dualvm/mcp_server.py`.
 - **Large output spills to a per-call file** on the VM; page it back with `read_file`.
 - **One pooled SSH connection per host**, reused; a network blip is retried here, not
   surfaced as a failure.
-- The `dualvm.safety` command filter refuses security-/system-config changes (never
+- The `labhand.safety` command filter refuses security-/system-config changes (never
   needed for analysis).
 
 ## Map of the package
 
-`dualvm/`: `remote.py` (SSH/SFTP pool), `shell.py` (run/read), `windows.py`,
+`labhand/`: `remote.py` (SSH/SFTP pool), `shell.py` (run/read), `windows.py`,
 `linux.py`, `jobs.py`, `images.py`, `safety.py`, `_result.py` (`VMResult`,
 `set_matcher`), `config.py`, `mcp_server.py`.
 
+`dualvm/`: the deprecated pre-rename name, kept as a thin alias — `import dualvm.X` is
+the same module object as `labhand.X` (one DeprecationWarning), and `python -m
+dualvm.mcp_server` / the `dualvm-mcp` script still start the server. `research/` and
+existing MCP configs rely on it; do not add code there.
+
 `tests/`: VM-free unit tests (`pytest`). License: Apache-2.0.
+
+## Research workspace
+
+For the feasibility-evidence study, read `research/CLAUDE.md` and `research/STATUS.md` first. API costs belong to the separate research harness; the deterministic `labhand` library still makes no model calls.
+

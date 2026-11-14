@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""dualvm.linux — split from the original monorepo (verbatim).
+"""labhand.linux — split from the original monorepo (verbatim).
 Xem TODO[coupling] cho cac cho can truyen tham so thay cho ws/reasoner."""
 import re, shlex
 from . import remote

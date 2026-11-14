@@ -4,7 +4,7 @@ description: >-
   Methodology for finding and triaging memory-safety bugs in a binary you are
   analysing on the dual-VM lab: establish the mitigation state, surface crashes
   (static recognition + fuzzing), and triage each crash for whether it is a real,
-  reachable, attacker-influenced defect — mapped to the dualvm tools. Load it for a
+  reachable, attacker-influenced defect — mapped to the labhand tools. Load it for a
   pwn-style target, a crash to assess, or when deciding if a binary has a
   memory-safety vulnerability. Triage and analysis only; it stops at "is this a real
   primitive", not weaponisation.
@@ -19,7 +19,7 @@ and bug classes. It stops at characterising a primitive; building an exploit is 
 separate, later decision.
 
 Pair it with `binary-analysis` (the general discipline R1-R10). Everything here runs
-on the Kali VM through `dualvm`.
+on the Kali VM through `labhand`.
 
 ## Order of work (cheapest signal first)
 
@@ -89,5 +89,5 @@ the scripted debugger and read, don't guess:
 - Reproduce before concluding: a crash that only happens once, or only under the
   fuzzer's instrumentation, may be a harness artefact (R6: corrupted vs empty vs the
   tool failing).
-- This skill ends at the primitive. Keep raw measurement in `dualvm`; the decision of
+- This skill ends at the primitive. Keep raw measurement in `labhand`; the decision of
   what to do with a primitive is the caller's.

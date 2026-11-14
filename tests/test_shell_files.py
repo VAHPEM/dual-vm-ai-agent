@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
-"""dualvm.shell: the samples/ change report and upload_file. No VM is contacted: the wrapper runs in a local bash
+"""labhand.shell: the samples/ change report and upload_file. No VM is contacted: the wrapper runs in a local bash
 (Linux, GNU find) and remote.upload is monkeypatched."""
 import shutil
 import subprocess
 
 import pytest
 
-from dualvm import shell
+from labhand import shell
 
 _GNU = shutil.which("bash") and shutil.which("timeout") and subprocess.run(
     ["find", ".", "-maxdepth", "0", "-printf", ""], capture_output=True).returncode == 0

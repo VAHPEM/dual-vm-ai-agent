@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""dualvm.windows — split from the original monorepo (verbatim).
+"""labhand.windows — split from the original monorepo (verbatim).
 Xem TODO[coupling] cho cac cho can truyen tham so thay cho ws/reasoner."""
 import os, re, json, shlex
 from . import remote
@@ -544,7 +544,7 @@ def win_frida(script, program=None, args="", pid=None, wait=8, kill=True,
         )
         try:
             _lout, _lt = remote.run_in_session1(_ps, timeout=int(launch_wait) + 40,
-                                                task="dualvm_frida_launch")
+                                                task="labhand_frida_launch")
         except Exception as _e:  # noqa: BLE001
             return VMResult(False, f"win_frida(launch): launch step failed: "
                                      f"{_e.__class__.__name__}: {_e}")
@@ -631,7 +631,7 @@ def win_frida(script, program=None, args="", pid=None, wait=8, kill=True,
         if desktop:
             text, timed_out = remote.run_in_session1(
                 '& "' + remote.WIN_PYTHON_EXE + '" "' + drv + '" 2>&1',
-                timeout=int(timeout), task="dualvm_frida")
+                timeout=int(timeout), task="labhand_frida")
         else:
             o, e = remote.ssh_exec('"' + remote.WIN_PYTHON_EXE + '" "' + drv + '"',
                                    host="windows", read_timeout=int(timeout) + 30)
@@ -898,7 +898,7 @@ if ($tops.Count -eq 0 -and $w32.Count -eq 0) { Write-Output "NO_WINDOW_MATCHED" 
 """.replace("__LIM__", str(int(limit))).replace("__MATCH__", m)
     try:
         text, timed_out = remote.run_in_session1(body, timeout=int(timeout),
-                                                 task="dualvm_uitree")
+                                                 task="labhand_uitree")
     except Exception as e:  # noqa: BLE001
         return VMResult(False, f"win_ui_tree failed: {e.__class__.__name__}: {e}")
     if timed_out:
@@ -985,7 +985,7 @@ Start-Sleep -Seconds __AFTER__
     try:
         text, timed_out = remote.run_in_session1(act + _PS_LIST_WINDOWS,
                                                  timeout=int(timeout),
-                                                 task="dualvm_uiclick")
+                                                 task="labhand_uiclick")
     except Exception as e:  # noqa: BLE001
         return VMResult(False, f"win_ui_click failed: {e.__class__.__name__}: {e}")
     if timed_out:
@@ -1076,7 +1076,7 @@ Start-Sleep -Seconds __AFTER__
     try:
         out, timed_out = remote.run_in_session1(body + _PS_LIST_WINDOWS,
                                                 timeout=int(timeout),
-                                                task="dualvm_uitype")
+                                                task="labhand_uitype")
     except Exception as e:  # noqa: BLE001
         return VMResult(False, f"win_ui_type failed: {e.__class__.__name__}: {e}")
     if timed_out:
@@ -1133,7 +1133,7 @@ Start-Sleep -Seconds __AFTER__
                 .replace("__AFTER__", str(int(after))))
     try:
         out, timed_out = remote.run_in_session1(body + _PS_LIST_WINDOWS,
-                                                timeout=int(timeout), task="dualvm_key")
+                                                timeout=int(timeout), task="labhand_key")
     except Exception as e:  # noqa: BLE001
         return VMResult(False, f"win_key failed: {e.__class__.__name__}: {e}")
     if timed_out:
@@ -1279,7 +1279,7 @@ if ($tops.Count -eq 0) { Write-Output "NO_WINDOW_MATCHED" } else {
    .replace("__LIM__", str(int(limit)))
     try:
         text, timed_out = remote.run_in_session1(body, timeout=int(timeout),
-                                                 task="dualvm_uiseq")
+                                                 task="labhand_uiseq")
     except Exception as e:  # noqa: BLE001
         return VMResult(False, f"win_ui_seq failed: {e.__class__.__name__}: {e}")
     if timed_out:

@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
-"""dualvm.jobs on Windows, without a VM: what job_start sends, and the launcher's behaviour.
+"""labhand.jobs on Windows, without a VM: what job_start sends, and the launcher's behaviour.
 
 The VM measurements these guard (2026-11-10, Windows 11 ARM64): a Start-Process child of the
 SSH session died ~1 s after job_start returned, and the one-line `& echo __JOB_RC=%errorlevel%`
-logged `cmd /c exit 3` as 0. See the comment above _WIN_JOB_LAUNCHER in dualvm/jobs.py.
+logged `cmd /c exit 3` as 0. See the comment above _WIN_JOB_LAUNCHER in labhand/jobs.py.
 """
 import os
 import subprocess
@@ -11,7 +11,7 @@ import sys
 
 import pytest
 
-from dualvm import jobs, remote
+from labhand import jobs, remote
 
 
 @pytest.fixture

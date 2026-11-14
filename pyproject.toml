@@ -1,7 +1,7 @@
 [project]
-name = "dual-vm-ai-agent"
+name = "labhand"
 version = "0.1.0"
-description = "The Muscle: deterministic control of a Kali + Windows VM over SSH (run, read, screenshot, Frida, gdb)."
+description = "The Muscle: deterministic control of a lab's machines over SSH (Kali + Windows today, more later): run, read, screenshot, Frida, gdb, files."
 requires-python = ">=3.10"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
@@ -18,12 +18,14 @@ test = ["pytest"]
 Repository = "https://github.com/VAHPEM/dual-vm-ai-agent"
 
 [project.scripts]
-dualvm-mcp = "dualvm.mcp_server:main"
+labhand-mcp = "labhand.mcp_server:main"
+dualvm-mcp = "labhand.mcp_server:main"      # pre-rename name, kept working
 beacon = "beacon.cli:main"
 beacon-mcp = "beacon.mcp_server:main"
 
 [tool.setuptools]
-packages = ["dualvm", "beacon"]
+# dualvm/ is the deprecated alias of labhand/ (see dualvm/__init__.py)
+packages = ["labhand", "dualvm", "beacon"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

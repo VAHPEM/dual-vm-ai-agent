@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""dualvm.shell — split from the original monorepo (verbatim).
+"""labhand.shell — split from the original monorepo (verbatim).
 Xem TODO[coupling] cho cac cho can truyen tham so thay cho ws/reasoner."""
 import os, re, shlex, base64
 from . import remote, config
@@ -370,7 +370,7 @@ MAX_UPLOAD = 200 * 1024 * 1024
 
 
 def upload_file(local_path, name=None, host="kali"):
-    """Copy a file from the machine running dualvm into a VM's samples/ dir (the working dir of run_cmd /
+    """Copy a file from the machine running labhand into a VM's samples/ dir (the working dir of run_cmd /
     run_script). `name` is the path inside samples/ (may hold sub-dirs, e.g. 'data/x.bin'); default: the file's
     own name. The library always had this (remote.upload, used inside jobs and Frida), but no tool exposed it:
     measured 2026-11-13, a worker that needed a 7 KB diff on Kali concluded "dualvm has no upload" and rebuilt

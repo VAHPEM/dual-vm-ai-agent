@@ -16,8 +16,8 @@ import pytest
 
 pytest.importorskip("mcp")
 
-from dualvm import mcp_server, shell, windows  # noqa: E402
-from dualvm._result import VMResult  # noqa: E402
+from labhand import mcp_server, shell, windows  # noqa: E402
+from labhand._result import VMResult  # noqa: E402
 
 EXPECTED_TOOLS = {
     "run_cmd", "run_script", "read_file", "job_start", "job_poll",
@@ -189,7 +189,7 @@ def _read_response(proc, want_id):
 def test_stdio_tools_list_carries_annotations():
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     env = dict(os.environ, PYTHONPATH=root + os.pathsep + os.environ.get("PYTHONPATH", ""))
-    proc = subprocess.Popen([sys.executable, "-m", "dualvm.mcp_server"], cwd=root, env=env,
+    proc = subprocess.Popen([sys.executable, "-m", "labhand.mcp_server"], cwd=root, env=env,
                             stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                             stderr=subprocess.PIPE, text=True)
     # readline() has no timeout: if the server hangs, kill it so the test fails
@@ -199,9 +199,9 @@ def test_stdio_tools_list_carries_annotations():
     try:
         _rpc(proc, {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
             "protocolVersion": "2025-06-18", "capabilities": {},
-            "clientInfo": {"name": "dualvm-tests", "version": "0"}}})
+            "clientInfo": {"name": "labhand-tests", "version": "0"}}})
         init = _read_response(proc, 1)
-        assert init["result"]["serverInfo"]["name"] == "dualvm"
+        assert init["result"]["serverInfo"]["name"] == "labhand"
         _rpc(proc, {"jsonrpc": "2.0", "method": "notifications/initialized"})
         _rpc(proc, {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}})
         tools = {t["name"]: t for t in _read_response(proc, 2)["result"]["tools"]}

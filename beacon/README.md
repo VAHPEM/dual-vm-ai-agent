@@ -1,6 +1,6 @@
 # beacon — keep Claude Code working, track what is left, light the way when it stalls
 
-`dualvm` is the Muscle: it runs things on the two VMs and never interprets.
+`labhand` is the Muscle: it runs things on the two VMs and never interprets.
 `beacon` is a Brain-side harness around Claude Code (the worker) that fixes three
 failure modes seen in practice:
 
@@ -28,10 +28,10 @@ without a virtualenv. Only the worker-facing MCP server needs the `mcp` package.
 | `decider.py` | At a branch (`ask(kind="approach_choice")`), a separate model (Opus 5.5) ranks the options from the problem's ledger, evidence, the human's answers, the worker's brief and the session's observations (tool calls + outputs; `decider_transcript=full` adds the worker's prose). Its ranking orders the nodes; its reasons go into the ledger. Falls back to the worker's order without a key / over budget / on refusal or timeout. |
 | `classify.py` | A question the worker left as prose at a stop is read by Opus (`classifier_model`) with the problem's ledger and the session's observations: a choice is made on the spot, a request to run something is approved by your standing rule, only information you alone have comes to you; when the worker looks stuck it adds a step-back note. No key / over budget = keyword heuristic. |
 | `project.py` | `beacon setup-project DIR`: merges the hooks, an allow rule for the beacon MCP tools, the MCP server entry and the worker rules into a project (backups as `*.beacon-bak`; never installs the hooks twice across `settings.json` / `settings.local.json`). |
-| `vmstate.py` | `vm_check` tool: fingerprints a VM through dualvm (processes, listening ports, samples/ digest without dualvm's `_*` files), keeps a baseline in the ledger and attaches each check as evidence, so a dead end shows whether the VM was clean. |
+| `vmstate.py` | `vm_check` tool: fingerprints a VM through labhand (processes, listening ports, samples/ digest without labhand's `_*` files), keeps a baseline in the ledger and attaches each check as evidence, so a dead end shows whether the VM was clean. |
 | `evalkit.py` | `beacon eval`: runs a suite under `baseline` / `gate` / `gate_lh` / `gate_lh_alt` (lighthouse on another Claude model), isolated copies, web denied, success decided by the task's verify command; `results.jsonl` (resumable) + `summary.md`. |
 | `demo.py` | `beacon demo`: a toy practice run (three puzzles, `check.py`, `TESTING.md`) and `--auto`, a live smoke test of the whole cycle with the real Claude Code. |
-| `doctor.py` | `beacon doctor [--project DIR] [--run RUN]`: python, claude CLI version, hooks installed exactly once, MCP python imports `mcp`, worker rules, API key presence, dualvm importable. OK / WARN / FAIL, exit 1 on FAIL. |
+| `doctor.py` | `beacon doctor [--project DIR] [--run RUN]`: python, claude CLI version, hooks installed exactly once, MCP python imports `mcp`, worker rules, API key presence, labhand importable. OK / WARN / FAIL, exit 1 on FAIL. |
 | `watchdog.py` | `beacon watch`: runs the worker headless (`claude -p … --output-format stream-json`), waits out rate limits (until the announced reset, else backoff) and resumes, stops on auth/billing errors and on any final gate decision, starts a fresh session when the gate rotates (context rot). |
 
 ## Quick start
@@ -47,7 +47,7 @@ cat > /tmp/fo13.md <<'EOF'
 EOF
 # verify: exit 0 = accepted; the candidate arrives in $BEACON_CANDIDATE (never on the command line)
 python3 -m beacon init ~/beacon-runs/fo13 --checklist /tmp/fo13.md
-python3 -m beacon setup-project ~/ctf/fo13 --mcp-python ~/venvs/dualvm/bin/python   # hooks, MCP, rules
+python3 -m beacon setup-project ~/ctf/fo13 --mcp-python ~/venvs/labhand/bin/python   # hooks, MCP, rules
 python3 -m beacon claude --run ~/beacon-runs/fo13   # interactive (= BEACON_RUN=… claude); `beacon watch` unattended
 ```
 
@@ -228,7 +228,7 @@ python3 -m beacon watch --run ~/beacon-runs/fo13 --cwd ~/ctf/fo13          # run
   has one line per session and wait. The run ends with `REPORT.md` and `notify_cmd`.
 - **Permissions.** A headless run has nobody to answer prompts: with the default (Manual)
   mode, any tool not pre-approved by the project's `permissions.allow` rules is denied.
-  Pre-approve what the worker legitimately needs (the dualvm and beacon MCP tools, the
+  Pre-approve what the worker legitimately needs (the labhand and beacon MCP tools, the
   Bash commands it uses) in the project's settings, or pass `--permission-mode`. The
   watchdog never adds a permissive mode on its own.
 - **Auth.** The CLI uses your Claude Code login unless `ANTHROPIC_API_KEY` is set (the key
@@ -391,7 +391,7 @@ python3 -m beacon watch --run ~/beacon-runs/fo13 --cwd ~/ctf/fo13          # run
 - **Activity vs evidence.** The PostToolUse hook stores a hash of each tool output in
   `activity.jsonl` (never the output). New activity only keeps the idle counter at zero;
   progress still requires a concluded node.
-- **Flags.** `dualvm.set_matcher` only spots a *candidate*. Done means the checklist's
+- **Flags.** `labhand.set_matcher` only spots a *candidate*. Done means the checklist's
   `verify` command (or you) accepted it: a worker can print any string.
 - **Tested on:** Linux x86-64 (Python 3.13, mcp 2.3.0) and Linux aarch64 (Python 3.10.12,
   mcp 2.3.0) — the unit tests in `tests/beacon/`, hooks driven as subprocesses with real hook

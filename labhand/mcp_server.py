@@ -1,15 +1,15 @@
 # -*- coding: utf-8 -*-
 """
-dualvm MCP server — expose the Muscle (2-VM control) over the Model Context
+labhand MCP server — expose the Muscle (lab machine control) over the Model Context
 Protocol so any external Brain (Claude Desktop, Claude Code, ...) can drive the
 Kali + Windows VMs. The server never interprets: each tool runs on a VM and
 returns raw output, exactly like the in-process library.
 
 Run:
-    DUALVM_ENV=/path/to/.env DUALVM_SSH_KEY=/path/to/key \
-        python -m dualvm.mcp_server            # stdio transport
+    LABHAND_ENV=/path/to/.env LABHAND_SSH_KEY=/path/to/key \
+        python -m labhand.mcp_server            # stdio transport
 
-Needs the `mcp` package:  pip install "dual-vm-ai-agent[mcp]"
+Needs the `mcp` package:  pip install "labhand[mcp]"
 Works with both SDK lines: mcp 1.x (>= 1.7, `FastMCP`) and mcp 2.x (`MCPServer`).
 
 Tool annotations
@@ -26,10 +26,10 @@ auto-approve and what to confirm with the user:
                     clicks/types into a GUI is marked destructive, because what it
                     does depends entirely on its arguments.
 * idempotentHint  - repeating the same call has no further effect.
-* openWorldHint   - the tool can reach beyond the two VMs (an arbitrary command or
+* openWorldHint   - the tool can reach beyond the lab hosts (an arbitrary command or
                     program may use the network).
 
-These are hints for the client UI, not a security boundary; `dualvm.safety` is
+These are hints for the client UI, not a security boundary; `labhand.safety` is
 still what refuses security-/system-config changes.
 """
 import base64
@@ -43,13 +43,13 @@ except ImportError as _e1:
         from mcp_types import ToolAnnotations
     except ImportError as _e2:
         raise SystemExit(
-            "dualvm.mcp_server needs the MCP SDK (mcp >= 1.7). Install it with:\n"
-            "    pip install \"dual-vm-ai-agent[mcp]\"\n"
+            "labhand.mcp_server needs the MCP SDK (mcp >= 1.7). Install it with:\n"
+            "    pip install \"labhand[mcp]\"\n"
             f"(mcp 1.x import error: {_e1}; mcp 2.x import error: {_e2})")
 
 from . import shell, windows, linux, jobs
 
-mcp = _Server("dualvm")
+mcp = _Server("labhand")
 
 
 def _observe(title):
@@ -99,7 +99,7 @@ def run_script(script: str, host: str = "kali", kind: str | None = None,
 
 @mcp.tool(annotations=_act("Upload a local file to a VM", idempotent=True, open_world=False))
 def upload_file(local_path: str, name: str | None = None, host: str = "kali"):
-    """Copy a file from this machine (where the dualvm MCP server runs) into the VM's samples/ dir, the
+    """Copy a file from this machine (where the labhand MCP server runs) into the VM's samples/ dir, the
     working dir of run_cmd and run_script. `name` is the path inside samples/ (sub-dirs allowed); default:
     the file's own name. An existing file of that name is replaced."""
     return _emit(shell.upload_file(local_path, name=name, host=host))

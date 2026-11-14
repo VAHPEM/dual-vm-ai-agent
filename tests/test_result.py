@@ -4,9 +4,9 @@ import re
 
 import pytest
 
-import dualvm
-from dualvm import _result
-from dualvm._result import VMResult, _find_match
+import labhand
+from labhand import _result
+from labhand._result import VMResult, _find_match
 
 
 @pytest.fixture(autouse=True)
@@ -34,13 +34,13 @@ def test_no_matcher_means_no_flag():
 
 
 def test_set_matcher_is_exported_and_used():
-    dualvm.set_matcher(lambda t: (re.search(r"\w+@flare-on\.com", t) or [None])[0])
+    labhand.set_matcher(lambda t: (re.search(r"\w+@flare-on\.com", t) or [None])[0])
     assert _find_match("out: abc@flare-on.com\n") == "abc@flare-on.com"
     assert _find_match("nothing here") is None
 
 
 def test_matcher_receives_empty_string_for_none():
     seen = []
-    dualvm.set_matcher(lambda t: seen.append(t))
+    labhand.set_matcher(lambda t: seen.append(t))
     _find_match(None)
     assert seen == [""]

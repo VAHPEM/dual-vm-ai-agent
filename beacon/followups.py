@@ -77,7 +77,7 @@ def capabilities(cfg):
         return own
     return (f"The worker (Claude Code) runs on the human's computer ({platform.system()} {platform.machine()}): it "
             "has a shell there, the project files, can install packages and read the web, and drives the lab "
-            "through dualvm: a Kali Linux VM and a Windows VM (run commands and scripts, GUI automation, Frida, "
+            "through labhand: a Kali Linux VM and a Windows VM (run commands and scripts, GUI automation, Frida, "
             "gdb, background jobs). Its work is inside the project it was given; a change outside it (system "
             "installs or settings, anything needing root) is the human's call. It has no API key, password or "
             "account the human has not given it, cannot spend money, and cannot use the human's own GUI sessions.")

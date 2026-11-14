@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
-"""dualvm.safety: refuse security-/system-config changes, but never block
+"""labhand.safety: refuse security-/system-config changes, but never block
 ordinary reverse-engineering commands that merely mention those words."""
 import pytest
 
-from dualvm.safety import _security_block
+from labhand.safety import _security_block
 
 
 @pytest.mark.parametrize("command", [

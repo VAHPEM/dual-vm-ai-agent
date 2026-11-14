@@ -8,7 +8,29 @@ import paramiko
 from dotenv import load_dotenv
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-load_dotenv(os.environ.get("DUALVM_ENV", os.path.join(_HERE, "..", ".env")))
+
+
+def _env_path(new, old, default):
+    """LABHAND_* wins; the pre-rename DUALVM_* name still works as a fallback."""
+    return os.environ.get(new) or os.environ.get(old) or default
+
+
+def _default_key(keys=os.path.join(_HERE, "..", ".ssh_keys")):
+    """.ssh_keys/labhand_ed25519 if present, else the one private key in .ssh_keys/ (a
+    checkout from before the rename keeps its old key file name), else labhand_ed25519."""
+    preferred = os.path.join(keys, "labhand_ed25519")
+    if os.path.exists(preferred):
+        return preferred
+    try:
+        found = sorted(f for f in os.listdir(keys)
+                       if not f.endswith(".pub") and not f.startswith(".")
+                       and os.path.isfile(os.path.join(keys, f)))
+    except OSError:
+        found = []
+    return os.path.join(keys, found[0]) if len(found) == 1 else preferred
+
+
+load_dotenv(_env_path("LABHAND_ENV", "DUALVM_ENV", os.path.join(_HERE, "..", ".env")))
 
 KALI_HOST = os.environ["KALI_HOST"]
 KALI_USER = os.environ["KALI_USER"]
@@ -19,8 +41,7 @@ WIN_PYTHON_EXE = os.environ.get(
     r"C:\Users\vahpem\AppData\Local\Programs\Python\Python314\python.exe",
 )
 KALI_PYTHON = os.environ.get("KALI_PYTHON", "/home/vahpem/analysis-venv/bin/python3")
-SSH_KEY_PATH = os.environ.get("DUALVM_SSH_KEY", os.path.join(
-    _HERE, "..", ".ssh_keys", "dualvm_ed25519"))
+SSH_KEY_PATH = _env_path("LABHAND_SSH_KEY", "DUALVM_SSH_KEY", _default_key())
 
 
 def _client(host, user, attempts=3):
@@ -410,7 +431,7 @@ $out | Out-File -FilePath "$S\\_gui_out.txt" -Encoding utf8
 """
 
 
-def run_in_session1(ps_body, timeout=60, task="dualvm_gui"):
+def run_in_session1(ps_body, timeout=60, task="labhand_gui"):
     """Run a PowerShell body on the Windows INTERACTIVE desktop; return (text, timed_out).
 
     The body may use $S for the samples dir; whatever it Write-Output's comes back.

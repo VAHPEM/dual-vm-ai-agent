@@ -1,16 +1,16 @@
-# dual-vm-ai-agent (`dualvm`)
+# labhand
 
 [![M8ven Score](https://m8ven.ai/badge/mcp/vahpem-dual-vm-ai-agent-qnrny8?v=bb3a6a518833e8a41fd7bf0586362b17)](https://m8ven.ai/mcp/vahpem-dual-vm-ai-agent-qnrny8?s=readme)
 
 **The Muscle.** A deterministic, `$0` library that lets an AI (the Brain) *operate*
-two virtual machines — a Kali Linux VM and a Windows VM — over SSH: run commands,
+the machines of a lab — today a Kali Linux VM and a Windows VM, more hosts later — over SSH: run commands,
 read output, drive GUIs, take and read screenshots, script a debugger (gdb / Frida),
 and run background jobs. It **never interprets** results and has no notion of
 "flag", "challenge" or "task": every function runs something on a VM and returns the
 raw output as a plain `VMResult`. The decision-making Brain lives elsewhere — any agent that imports this
 package or drives it over MCP.
 
-`dualvm` is the "how to act on the machines" layer; the reasoning / API-calling
+`labhand` is the "how to act on the machines" layer; the reasoning / API-calling
 Brain is a separate concern, so the two can be reused independently.
 
 ## Install
@@ -28,20 +28,22 @@ pip install -e ".[test]"    # + pytest
 pytest
 ```
 
-The unit tests never contact a VM: they point `DUALVM_ENV` / `DUALVM_SSH_KEY` at
+The unit tests never contact a VM: they point `LABHAND_ENV` / `LABHAND_SSH_KEY` at
 paths that do not exist and monkeypatch the library calls. They cover the
-`dualvm.safety` command filter, the `VMResult` / `set_matcher` contract, and the
+`labhand.safety` command filter, the `VMResult` / `set_matcher` contract, and the
 MCP server (tool list, annotations, result conversion, and a real stdio
 `tools/list` round-trip). The MCP tests are skipped if `mcp` is not installed.
 
 ## Configure
 
-Two VMs reachable over SSH with one key. Point the package at your `.env` and key:
+Lab hosts reachable over SSH with one key. Point the package at your `.env` and key:
 
 | Environment variable | Meaning | Default |
 |---|---|---|
-| `DUALVM_ENV` | path to the `.env` holding the host/user vars | `<pkg>/../.env` |
-| `DUALVM_SSH_KEY` | path to the private SSH key for both VMs | `<pkg>/../.ssh_keys/dualvm_ed25519` |
+| `LABHAND_ENV` | path to the `.env` holding the host/user vars | `<pkg>/../.env` |
+| `LABHAND_SSH_KEY` | path to the private SSH key for every lab host | `<pkg>/../.ssh_keys/labhand_ed25519` if present, else the single key in `.ssh_keys/` |
+
+The pre-rename names `DUALVM_ENV` / `DUALVM_SSH_KEY` are read when the `LABHAND_*` one is unset.
 
 `.env` keys: `KALI_HOST`, `KALI_USER`, `WIN_HOST`, `WIN_USER`, and optionally
 `WIN_PYTHON_EXE`, `KALI_PYTHON`. The key is never printed or committed.
@@ -49,8 +51,8 @@ Two VMs reachable over SSH with one key. Point the package at your `.env` and ke
 ## Use as a library
 
 ```python
-import dualvm
-from dualvm import shell, windows, linux, jobs
+import labhand
+from labhand import shell, windows, linux, jobs
 
 r = shell.run_cmd("uname -a")                 # VMResult
 print(r.ok, r.summary, r.detail)
@@ -77,8 +79,8 @@ The library does not know what a "flag"/win-string looks like. A Brain that care
 teaches it once:
 
 ```python
-import re, dualvm
-dualvm.set_matcher(lambda t: (re.search(r"...@flare-on\.com", t) or [None])[0])
+import re, labhand
+labhand.set_matcher(lambda t: (re.search(r"...@flare-on\.com", t) or [None])[0])
 ```
 
 Thereafter tools fill `VMResult.flag` when the pattern appears in raw output. This is
@@ -115,7 +117,7 @@ that were refactored out of the tool bodies):
 
 - **One pooled SSH connection per host**, reused; a dead transport is detected and
   replaced. A network blip is retried here, not surfaced as a failure.
-- **Real, tree-killing timeouts on both VMs** (GNU `timeout -k` on Kali; a Python
+- **Real, tree-killing timeouts on every host** (GNU `timeout -k` on Kali; a Python
   launcher with `taskkill /T` on Windows) so a killed call never leaves a process
   running on the VM.
 - **Windows GUI work runs in the interactive session (session 1)** via a scheduled
@@ -128,7 +130,7 @@ that were refactored out of the tool bodies):
 Expose the Muscle to any MCP client (Claude Desktop / Claude Code):
 
 ```bash
-python -m dualvm.mcp_server      # reads .env + .ssh_keys next to the package
+labhand-mcp                      # = python -m labhand.mcp_server; reads .env + .ssh_keys next to the package
 ```
 
 Each tool above is published as an MCP tool; screenshots come back as image content.
@@ -143,8 +145,15 @@ ask before the actors:
 | Act | `run_cmd`, `run_script`, `job_start`, `win_gui_run`, `win_frida`, `win_ui_click`, `win_ui_type`, `win_key`, `win_ui_seq`, `linux_gui_run`, `linux_gdb` | destructive, open-world |
 | Act (bounded) | `job_poll` (can `stop` a job), `upload_file` (replaces a file in `samples/`) | destructive, idempotent, closed-world |
 
-The hints are UI guidance for the client, not a security boundary — `dualvm.safety`
+The hints are UI guidance for the client, not a security boundary — `labhand.safety`
 is what refuses security-/system-config changes.
+
+## Renamed from `dualvm`
+
+The package was called `dualvm` until 2026-11. The old name still works: `import dualvm`
+(and `dualvm.shell`, ...) gives the very same `labhand` modules with one
+`DeprecationWarning`, `python -m dualvm.mcp_server` and the `dualvm-mcp` script start the
+same server, and `DUALVM_ENV` / `DUALVM_SSH_KEY` are honoured as fallbacks.
 
 ## License
 
@@ -154,5 +163,5 @@ Copyright 2026 Anh Ve Pham (VAHPEM). Licensed under the
 ## Scope
 
 Built for authorized reverse-engineering and security-analysis work on VMs you own. The command
-filter (`dualvm.safety`) refuses security-/system-config changes that are never
+filter (`labhand.safety`) refuses security-/system-config changes that are never
 needed for analysis.

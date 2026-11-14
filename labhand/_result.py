@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Kieu tra ve thuan du lieu cho dualvm. Khong biet gi ve flag/Workspace."""
+"""Kieu tra ve thuan du lieu cho labhand. Khong biet gi ve flag/Workspace."""
 import re
 from dataclasses import dataclass, field
 
@@ -11,7 +11,7 @@ _MATCHER = [lambda text: None]
 
 
 def set_matcher(fn):
-    """caller goi cai nay mot lan de dualvm biet cach nhan ra flag.
+    """caller goi cai nay mot lan de labhand biet cach nhan ra flag.
     Thu vien tu no khong co khai niem flag."""
     _MATCHER[0] = fn
 

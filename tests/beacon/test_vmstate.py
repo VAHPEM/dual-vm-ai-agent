@@ -94,3 +94,13 @@ def test_vm_check_reports_a_missing_lab(make_run, monkeypatch):
 def test_digest_line_is_picked_even_with_noise_after_it():
     out = KALI_OUT.replace("3f9a0c1d2e4b5a67\n", "3f9a0c1d2e4b5a67\nfind: './x': Permission denied\n")
     assert vmstate.parse(out, "kali")["files"] == "3f9a0c1d2e4b5a67"
+
+
+def test_default_runner_goes_through_labhand(monkeypatch):
+    from labhand import shell
+    from labhand._result import VMResult
+    seen = []
+    monkeypatch.setattr(shell, "run_script", lambda s, host, kind, timeout: seen.append((host, kind)) or
+                        VMResult(True, "s", detail="out"))
+    assert vmstate.labhand_runner("echo", "kali", "bash") == (True, "out")
+    assert seen == [("kali", "bash")]
