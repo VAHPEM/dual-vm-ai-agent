@@ -92,6 +92,36 @@ Switch the VM to **Shared** only for an update session, with no sample inside (b
 right after reverting to a clean snapshot), then switch back to **Host Only** and
 check again before the next sample.
 
+## Clean shutdown of a linux guest (labhand.utm)
+
+`labhand.utm.vm_stop(how="request")` / `vm_revert` shut a VM down cleanly by asking the
+guest over SSH; they never force-power-off a session they did not start as disposable.
+Windows accepts `shutdown /s /t 0` from the SSH user. A linux guest needs a sudo rule
+for the SSH user, because UTM's ACPI power button is not enough: on the Kali VM
+xfce4-power-manager holds the power-key inhibitor and only shows a dialog, and polkit
+answers `CanPowerOff = challenge`. labhand always calls `sudo -n`, so a missing rule
+fails at once instead of waiting for a password.
+
+The rule, as installed on the Kali VM on 2026-11-15 (user `vahpem`; use your SSH user):
+
+```
+# /etc/sudoers.d/labhand-power   (root:root, mode 0440)
+vahpem ALL=(root) NOPASSWD: /usr/bin/systemctl poweroff, /usr/bin/systemctl reboot, /usr/sbin/poweroff, /usr/sbin/reboot
+```
+
+Install it with a syntax check first, so a typo cannot lock you out of sudo:
+
+```bash
+printf '%s\n' 'vahpem ALL=(root) NOPASSWD: /usr/bin/systemctl poweroff, /usr/bin/systemctl reboot, /usr/sbin/poweroff, /usr/sbin/reboot' > /tmp/labhand-power
+sudo visudo -cf /tmp/labhand-power                 # must say "parsed OK"
+sudo install -o root -g root -m 0440 /tmp/labhand-power /etc/sudoers.d/labhand-power
+sudo -n -l /usr/bin/systemctl poweroff             # as the SSH user: prints the command, rc 0
+```
+
+Measured after installing it: a clean `vm_stop(host="kali", how="request")` takes ~9 s.
+(The first version named the wrong user and `sudo -n` kept answering "a password is
+required" - check with `sudo -n -l` before relying on it.)
+
 ## Check after applying
 
 Run these through labhand (or in the guest's console). Each line must report the

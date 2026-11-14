@@ -24,8 +24,9 @@ EXPECTED_TOOLS = {
     "win_windows", "win_screenshot", "win_gui_run", "win_frida", "win_ui_tree",
     "win_ui_click", "win_ui_type", "win_key", "win_ui_seq",
     "linux_gui_run", "linux_gdb", "upload_file", "download_file",
+    "vm_status", "vm_start", "vm_stop", "vm_revert", "vm_snapshot",
 }
-READ_ONLY = {"read_file", "win_windows", "win_screenshot", "win_ui_tree"}
+READ_ONLY = {"read_file", "win_windows", "win_screenshot", "win_ui_tree", "vm_status"}
 HINTS = ("readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint")
 
 # 1x1 transparent PNG

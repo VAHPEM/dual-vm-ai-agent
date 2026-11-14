@@ -110,6 +110,23 @@ connection. Every `win_*` / `linux_*` call below also takes `host=None`.
 | `linux_gui_run(command, wait=5, screen="1280x800x24", timeout=60)` | run a GUI program on Kali under **Xvfb** and return a screenshot. |
 | `linux_gdb(prog, script, args="", gui=True, screen="1280x800x24", max_lines=800, timeout=120)` | run a **gdb-python** script against an ELF (ASLR off, PIE base fixed at `0x555555554000`); returns whatever it `log()`s. Helpers injected: `rd/wr/u64/u32/f64/reg/cstr/at/hook/starti/cont/run`. |
 
+### UTM power & disposable sessions — `labhand.utm` (runs `utmctl` on the Mac, not over SSH)
+Needs `<NAME>_UTM_VM` in the inventory. Refuses to stop a host with a RUNNING job.
+| call | does |
+|---|---|
+| `vm_status(host)` | `started` / `stopped` / ... of the host's UTM VM. |
+| `vm_start(host, disposable=False, timeout=300)` | start; `disposable=True` = every disk write of the session is discarded at stop. Waits for SSH. |
+| `vm_stop(host, how="request", timeout=180)` | `request`: clean shutdown (guest asked over SSH + ACPI), fails rather than forcing; `force` (after `sync`), `kill`. |
+| `vm_revert(host)` | stop + start a fresh disposable session on the saved disk. |
+| `vm_snapshot(action, host, name)` | `list/create/restore/delete` over `utmctl snapshot` once UTM >= 5.0.6 (+ macOS 26 for QEMU); refused with that reason before; restore/delete only labhand's own snapshots. |
+A clean stop needs the guest: Windows `shutdown /s`; Kali ignores the ACPI button
+(xfce) and shuts down through its passwordless `sudo -n /usr/bin/systemctl poweroff`
+rule (`/etc/sudoers.d/labhand-power`, exact line and install steps in
+`docs/LAB-ISOLATION.md`). `vm_revert` powers off only a disposable session labhand started in
+the guest's current boot; a successful stop forgets the session, so any session labhand
+did not start counts as unknown and gets the clean request. Windows after a restart sits at the logon screen until someone logs on,
+and the `win_*` GUI tools need that logon.
+
 ### Background jobs — `labhand.jobs`
 | call | does |
 |---|---|
@@ -124,7 +141,7 @@ LABHAND_ENV=... LABHAND_SSH_KEY=... labhand-mcp      # stdio; = python -m labhan
 ```
 Each tool above is published as an MCP tool; screenshots come back as image content.
 Every tool declares all four MCP hints (readOnly / destructive / idempotent /
-openWorld): `read_file`, `win_windows`, `win_screenshot`, `win_ui_tree` are read-only;
+openWorld): `read_file`, `win_windows`, `win_screenshot`, `win_ui_tree`, `vm_status` are read-only;
 everything else is destructive. Keep this when adding a tool (`tests/` enforces it).
 The server registers as `labhand`. See `labhand/mcp_server.py`.
 

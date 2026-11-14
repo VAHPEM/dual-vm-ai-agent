@@ -54,7 +54,7 @@ except ImportError as _e1:
             "    pip install \"labhand[mcp]\"\n"
             f"(mcp 1.x import error: {_e1}; mcp 2.x import error: {_e2})")
 
-from . import shell, windows, linux, jobs
+from . import shell, windows, linux, jobs, utm
 
 mcp = _Server("labhand")
 
@@ -243,6 +243,42 @@ def job_poll(name: str | None = None, tail: int = 40, grep: str | None = None,
              stop: bool = False, host: str | None = None):
     """Check / tail / stop a background job (omit `name` to list all jobs)."""
     return _emit(jobs.job_poll(name=name, tail=tail, grep=grep, stop=stop, host=host))
+
+
+# --- UTM power / disposable sessions (runs utmctl on THIS machine, the UTM host) -----
+@mcp.tool(annotations=_observe("UTM state of a lab VM"))
+def vm_status(host: str | None = None):
+    """The UTM state (started / stopped / suspended) of a lab host's VM (<NAME>_UTM_VM)."""
+    return _emit(utm.vm_status(host))
+
+
+@mcp.tool(annotations=_act("Start a lab VM", open_world=False))
+def vm_start(host: str | None = None, disposable: bool = False, timeout: int = 300):
+    """Start a lab host's VM in UTM and wait until SSH answers. disposable=true runs it as a
+    snapshot: every disk write of the session is discarded when it stops."""
+    return _emit(utm.vm_start(host, disposable=disposable, timeout=timeout))
+
+
+@mcp.tool(annotations=_act("Stop a lab VM", idempotent=True, open_world=False))
+def vm_stop(host: str | None = None, how: str = "request", timeout: int = 180):
+    """Stop a lab host's VM: how=request (clean shutdown), force (power off) or kill.
+    Refused while a labhand background job is still running on the host."""
+    return _emit(utm.vm_stop(host, how=how, timeout=timeout))
+
+
+@mcp.tool(annotations=_act("Revert a lab VM to its saved disk", open_world=False))
+def vm_revert(host: str | None = None, timeout: int = 300):
+    """Stop the VM and start a fresh disposable session on its saved disk (all changes of
+    a disposable session are gone); waits for SSH."""
+    return _emit(utm.vm_revert(host, timeout=timeout))
+
+
+@mcp.tool(annotations=_act("Snapshot a lab VM", open_world=False))
+def vm_snapshot(action: str, host: str | None = None, name: str | None = None):
+    """list / create / restore / delete UTM snapshots (utmctl >= UTM 5.0.6; QEMU VMs need
+    macOS 26). Refused with the reason where utmctl has no snapshot command. restore and
+    delete only act on snapshots labhand created."""
+    return _emit(utm.vm_snapshot(action, host=host, name=name))
 
 
 def main():

@@ -118,6 +118,7 @@ task-specific bit.
 | Linux: run GUI headless | `linux.linux_gui_run` (Xvfb + screenshot) |
 | Linux: debug | `linux.linux_gdb` (gdb-python, ASLR off, fixed PIE base) |
 | Background jobs | `jobs.job_start`, `jobs.job_poll` |
+| UTM power (local, `utmctl`) | `utm.vm_status`, `vm_start` (optionally `disposable`), `vm_stop`, `vm_revert` (fresh disposable session), `vm_snapshot` (needs UTM >= 5.0.6 + macOS 26; refused before) |
 
 Three tools take an extra parameter that the Brain fills (the only coupling points
 that were refactored out of the tool bodies):
@@ -158,9 +159,10 @@ ask before the actors:
 
 | Kind | Tools | Hints |
 |---|---|---|
-| Observe | `read_file`, `win_windows`, `win_screenshot`, `win_ui_tree` | read-only, idempotent, closed-world |
+| Observe | `read_file`, `win_windows`, `win_screenshot`, `win_ui_tree`, `vm_status` | read-only, idempotent, closed-world |
 | Act | `run_cmd`, `run_script`, `job_start`, `win_gui_run`, `win_frida`, `win_ui_click`, `win_ui_type`, `win_key`, `win_ui_seq`, `linux_gui_run`, `linux_gdb` | destructive, open-world |
 | Act (bounded) | `job_poll` (can `stop` a job), `upload_file` (replaces a file in `samples/`), `download_file` (writes a local file; `overwrite` can replace one) | destructive, idempotent, closed-world |
+| Act on the VM itself | `vm_start`, `vm_revert`, `vm_snapshot` (closed-world), `vm_stop` (also idempotent) | destructive |
 
 The hints are UI guidance for the client, not a security boundary. `labhand.safety`
 refuses only three disk-wrecking commands (recursive delete of `/`, `mkfs` / `diskpart`,
