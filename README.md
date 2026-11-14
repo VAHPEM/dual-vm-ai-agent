@@ -145,8 +145,10 @@ ask before the actors:
 | Act | `run_cmd`, `run_script`, `job_start`, `win_gui_run`, `win_frida`, `win_ui_click`, `win_ui_type`, `win_key`, `win_ui_seq`, `linux_gui_run`, `linux_gdb` | destructive, open-world |
 | Act (bounded) | `job_poll` (can `stop` a job), `upload_file` (replaces a file in `samples/`) | destructive, idempotent, closed-world |
 
-The hints are UI guidance for the client, not a security boundary — `labhand.safety`
-is what refuses security-/system-config changes.
+The hints are UI guidance for the client, not a security boundary. `labhand.safety`
+refuses only three disk-wrecking commands (recursive delete of `/`, `mkfs` / `diskpart`,
+`format X:`); the boundary is the lab's network isolation
+([docs/LAB-ISOLATION.md](docs/LAB-ISOLATION.md)).
 
 ## Renamed from `dualvm`
 
@@ -162,6 +164,9 @@ Copyright 2026 Anh Ve Pham (VAHPEM). Licensed under the
 
 ## Scope
 
-Built for authorized reverse-engineering and security-analysis work on VMs you own. The command
-filter (`labhand.safety`) refuses security-/system-config changes that are never
-needed for analysis.
+Built for authorized reverse-engineering and malware-analysis work on VMs you own. The
+VMs are a free-action lab: turning Defender off, changing the firewall, registry,
+services or accounts is allowed. The command filter (`labhand.safety`) refuses only a
+recursive delete of `/`, `mkfs` / `diskpart` and `format X:`. Keeping samples inside the
+lab is the job of the VMs' network isolation, see
+[docs/LAB-ISOLATION.md](docs/LAB-ISOLATION.md).

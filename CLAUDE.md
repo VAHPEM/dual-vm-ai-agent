@@ -134,8 +134,12 @@ The server registers as `labhand`. See `labhand/mcp_server.py`.
 - **Large output spills to a per-call file** on the VM; page it back with `read_file`.
 - **One pooled SSH connection per host**, reused; a network blip is retried here, not
   surfaced as a failure.
-- The `labhand.safety` command filter refuses security-/system-config changes (never
-  needed for analysis).
+- **The lab is free-action; network isolation is the boundary.** Security/system
+  configuration on the VMs (Defender, firewall, registry, services, ACLs, accounts,
+  `cipher`, a root shell) may be changed freely. The `labhand.safety` filter refuses
+  exactly three disk-wrecking commands: recursive delete of `/`, `mkfs` / `diskpart`,
+  `format X:`. What keeps a sample in the lab is the UTM network setup, documented in
+  `docs/LAB-ISOLATION.md` and applied by the human.
 
 ## Map of the package
 

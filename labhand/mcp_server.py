@@ -29,8 +29,11 @@ auto-approve and what to confirm with the user:
 * openWorldHint   - the tool can reach beyond the lab hosts (an arbitrary command or
                     program may use the network).
 
-These are hints for the client UI, not a security boundary; `labhand.safety` is
-still what refuses security-/system-config changes.
+These are hints for the client UI, not a security boundary. `labhand.safety` only
+refuses three disk-wrecking commands (recursive delete of /, mkfs / diskpart,
+`format X:`); security/system configuration (Defender, firewall, registry, services,
+accounts, ...) may be changed freely on the lab VMs. The boundary is the lab's network
+isolation (docs/LAB-ISOLATION.md).
 """
 import base64
 
@@ -84,7 +87,9 @@ def _emit(r):
 @mcp.tool(annotations=_act("Run shell command on a VM"))
 def run_cmd(command: str, host: str = "kali", timeout: int = 20):
     """Run a one-line shell command on a VM (kali=bash, windows=cmd.exe), in the
-    samples/ working dir, and return its raw output."""
+    samples/ working dir, and return its raw output. Security/system settings
+    (Defender, firewall, registry, services, accounts) may be changed freely on the lab
+    VMs; only rm -rf /, mkfs/diskpart and `format X:` are refused."""
     return _emit(shell.run_cmd(command, host=host, timeout=timeout))
 
 
@@ -92,7 +97,8 @@ def run_cmd(command: str, host: str = "kali", timeout: int = 20):
 def run_script(script: str, host: str = "kali", kind: str | None = None,
                timeout: int = 20, python: str | None = None):
     """Write a multi-line script to the VM and run it (bash/python3 on kali;
-    powershell/cmd on windows). Returns combined output."""
+    powershell/cmd on windows). Returns combined output. Same filter as run_cmd:
+    only rm -rf /, mkfs/diskpart and `format X:` are refused."""
     return _emit(shell.run_script(script, host=host, kind=kind, timeout=timeout,
                                   python=python))
 

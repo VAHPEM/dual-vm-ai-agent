@@ -402,9 +402,9 @@ def upload_file(local_path, name=None, host="kali"):
 def run_cmd(command, host="kali", timeout=20):
     blocked = _security_block(command)
     if blocked:
-        return VMResult(False, f"blocked: this command touches {blocked}, which is "
-                                 "not permitted (see tool description) - it is never "
-                                 "needed to solve a challenge; find another way.")
+        return VMResult(False, f"blocked: this command would run {blocked}, which only "
+                                 "wrecks the VM's disk (labhand.safety refuses rm -rf /, "
+                                 "mkfs/diskpart and format X:); find another way.")
     return _run_and_wrap(command, host, timeout, _cmd_label(command),
                          grep_shape=_grep_shape(command) if host != "windows" else None)
 
@@ -412,9 +412,9 @@ def run_cmd(command, host="kali", timeout=20):
 def run_script(script, host="kali", kind=None, timeout=20, python=None):
     blocked = _security_block(script)
     if blocked:
-        return VMResult(False, f"blocked: this script touches {blocked}, which is "
-                                 "not permitted (see tool description) - it is never "
-                                 "needed to solve a challenge; find another way.")
+        return VMResult(False, f"blocked: this script would run {blocked}, which only "
+                                 "wrecks the VM's disk (labhand.safety refuses rm -rf /, "
+                                 "mkfs/diskpart and format X:); find another way.")
     kind = kind or ("powershell" if host == "windows" else "bash")
     exts = {"bash": "sh", "python3": "py", "powershell": "ps1", "cmd": "bat"}
     if kind not in exts:
