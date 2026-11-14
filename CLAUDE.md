@@ -26,6 +26,9 @@ or "task". The deciding Brain lives elsewhere — any agent that imports this pa
   (`linux` | `windows`), optional `<NAME>_PYTHON`, `<NAME>_UTM_VM`. Without
   `LABHAND_HOSTS` the old keys still work unchanged: `kali` from `KALI_HOST` /
   `KALI_USER` (+ `KALI_PYTHON`), `windows` from `WIN_HOST` / `WIN_USER` (+ `WIN_PYTHON_EXE`).
+- **Working directory** on every host: `LABHAND_WORKDIR` (default `samples`, relative to
+  the SSH user's home, letters/digits/`._-/` only). Every tool starts there, relative
+  paths resolve there, spills / jobs / uploads land there. "samples/" in this file means it.
 - `.env`, `.env.*`, `.ssh_keys/`, and any private key are **git-ignored — never commit
   them.** This repo is public.
 
@@ -50,7 +53,7 @@ windows.win_windows(match="Error")     # read the Windows desktop as text (cheap
 | `summary` | one short line (headline) |
 | `detail` | the raw output (large output spills to a VM file; page it with `read_file`) |
 | `known` | measured facts worth keeping |
-| `flag` | a win-string, only if a matcher was injected (see below); else `None` |
+| `match` | what the injected matcher found in the raw output (see below); else `None`. `flag` is its deprecated alias (`r.flag`, `VMResult(..., flag=)` still work) |
 | `info` | the text actually shown, for novelty accounting |
 | `image` | `{media_type, data}` for screenshot/picture tools, else `None` |
 | `waiting` | the step is legitimately waiting on a running job |
@@ -61,10 +64,10 @@ The library does not know what a flag is. A Brain that cares teaches it once:
 
 ```python
 import re, labhand
-labhand.set_matcher(lambda t: (re.search(r"...@flare-on\.com", t) or [None])[0])
+labhand.set_matcher(lambda t: (re.search(r"WIN\{[^}]+\}", t) or [None])[0])
 ```
 
-Afterwards tools fill `VMResult.flag` when the pattern appears in raw output.
+Afterwards tools fill `VMResult.match` when the pattern appears in raw output.
 
 ## Tools — everything you can do on the VMs
 
@@ -177,6 +180,15 @@ The server registers as `labhand`. See `labhand/mcp_server.py`.
 the same module object as `labhand.X` (one DeprecationWarning), and `python -m
 dualvm.mcp_server` / the `dualvm-mcp` script still start the server. `research/` and
 existing MCP configs rely on it; do not add code there.
+
+`skills/`: the agent skills, one `skills/<name>/SKILL.md` each — the **single source**,
+hand-edited markdown (`binary-analysis`: the analysis discipline R1-R10 and technique
+notes; `vuln-research`: memory-safety triage). `python skills/sync.py` copies them to
+`.claude/skills/` (generated but committed, so a fresh clone has the project skills;
+`tests/test_skills.py` fails if it drifts from `skills/`; `--dest DIR` for other skill
+dirs, `--check` reports drift). Never edit the copies.
+
+`docs/`: `LAB-ISOLATION.md` (the lab's network boundary).
 
 `tests/`: VM-free unit tests (`pytest`). License: Apache-2.0.
 

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
-"""labhand.output — split from the original monorepo (verbatim).
-Xem TODO[coupling] cho cac cho can truyen tham so thay cho ws/reasoner."""
+"""labhand.output — paging limits and spilling large output to a file on the host."""
 from . import remote, config
+from .hosts import workdir as _wd, workdir_win as _wdw  # noqa: F401
 from ._result import VMResult, SLICE  # noqa
 
 
@@ -83,7 +83,7 @@ def _save_to_host(host, name, data):
     Brain. write_remote() (SFTP) has no such command-line-size limit and already
     proved reliable for windows - use it unconditionally for both hosts."""
     try:
-        remote.write_remote(f"samples/{name}", data, host=host)
-        return f"samples/{name}"
+        remote.write_remote(f"{_wd()}/{name}", data, host=host)
+        return f"{_wd()}/{name}"
     except Exception:  # noqa: BLE001
         return None

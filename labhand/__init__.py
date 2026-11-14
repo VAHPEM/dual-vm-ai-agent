@@ -1,2 +1,2 @@
-"""labhand — dieu khien 2 VM (Kali + Windows) qua SSH. Tra VMResult thuan du lieu."""
+"""labhand — operate lab VMs (Kali + Windows) over SSH; every tool returns a plain VMResult."""
 from ._result import VMResult, set_matcher  # noqa

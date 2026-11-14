@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-"""labhand.linux — split from the original monorepo (verbatim).
-Xem TODO[coupling] cho cac cho can truyen tham so thay cho ws/reasoner."""
+"""labhand.linux — Linux-host tools: a GUI program under Xvfb, scripted gdb."""
 import re, shlex
 from . import remote, hosts
+from .hosts import workdir as _wd, workdir_win as _wdw  # noqa: F401
 from ._result import VMResult, _spill, _find_match  # noqa
 from .safety import _security_block
 from .images import _prepare_image
@@ -28,7 +28,7 @@ def linux_gui_run(command, wait=5, screen="1280x800x24", timeout=60, host=None):
         return VMResult(False, "linux_gui_run: no screenshot was produced - "
                                  f"output: {(res.detail or '')[:400]}")
     try:
-        raw = remote.read_bytes("samples/_xshot.png", host=host)
+        raw = remote.read_bytes(f"{_wd()}/_xshot.png", host=host)
     except Exception as e:  # noqa: BLE001
         return VMResult(False, f"linux_gui_run: could not read _xshot.png back ({e})")
     media, b64, note = _prepare_image(raw, "png")
@@ -177,8 +177,8 @@ def linux_gdb(prog, script, args="", gui=True, screen="1280x800x24",
 
     # Write the driver (prelude + exec-tail) and the Brain's script as SEPARATE files, so
     # a Python error in the Brain's code reports ITS line number, not a prelude-shifted one.
-    remote.write_remote("samples/_gdb_run.py", _GDB_PRELUDE + _GDB_RUN_TAIL, host=host)
-    remote.write_remote("samples/_gdb_user.py", script, host=host)
+    remote.write_remote(f"{_wd()}/_gdb_run.py", _GDB_PRELUDE + _GDB_RUN_TAIL, host=host)
+    remote.write_remote(f"{_wd()}/_gdb_user.py", script, host=host)
 
     # gdb --args sets the inferior + argv but does NOT start it; the Brain's run()/starti()
     # does. timeout -k 10 tree-kills gdb (and the inferior in its process group) so a hung
@@ -186,11 +186,11 @@ def linux_gdb(prog, script, args="", gui=True, screen="1280x800x24",
     gdb_cmd = (f"timeout -k 10 {timeout} gdb -q -batch -x _gdb_run.py "
                f"--args ./{shlex.quote(prog)}" + (f" {argstr}" if argstr else ""))
     if gui:
-        inner = ("cd samples 2>/dev/null; "
+        inner = (f"cd {_wd()} 2>/dev/null; "
                  "xvfb-run -a -s " + shlex.quote("-screen 0 " + str(screen))
                  + " bash -c " + shlex.quote(gdb_cmd) + "; echo __GDB_RC=$?")
     else:
-        inner = "cd samples 2>/dev/null; " + gdb_cmd + "; echo __GDB_RC=$?"
+        inner = f"cd {_wd()} 2>/dev/null; " + gdb_cmd + "; echo __GDB_RC=$?"
     cmd = f"bash -c {shlex.quote(inner)}"
 
     out, errtxt = remote.ssh_exec(cmd, host=host, read_timeout=timeout + 30)
@@ -228,6 +228,6 @@ def linux_gdb(prog, script, args="", gui=True, screen="1280x800x24",
     known = [f"linux_gdb on {prog} -> {n} chars"
              + (f" (full -> {saved}, page with read_file)" if saved else "")
              + (" [TIMEOUT]" if timed_out else "")]
-    return VMResult(ok, f"linux_gdb on {prog}: {n} chars{note}" + ("; FLAG" if flag else ""),
+    return VMResult(ok, f"linux_gdb on {prog}: {n} chars{note}" + ("; MATCH" if flag else ""),
                       detail=f"[linux_gdb @ {prog}]\n" + detail,
-                      known=known if ok else [], flag=flag, info=detail)
+                      known=known if ok else [], match=flag, info=detail)

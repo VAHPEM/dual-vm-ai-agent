@@ -76,8 +76,8 @@ def _emit(r):
     """VMResult -> MCP content: a text block, plus an image block if the tool
     produced a picture (screenshot, rendered page)."""
     text = r.summary + (("\n\n" + r.detail) if r.detail else "")
-    if r.flag:
-        text += f"\n\nMATCH: {r.flag}"
+    if r.match:
+        text += f"\n\nMATCH: {r.match}"
     if r.image and r.image.get("data"):
         try:
             return [text, Image(data=base64.b64decode(r.image["data"]),
@@ -87,7 +87,7 @@ def _emit(r):
     return text
 
 
-# --- chay lenh / doc output -------------------------------------------------
+# --- run commands / read output ---------------------------------------------
 @mcp.tool(annotations=_act("Run shell command on a VM"))
 def run_cmd(command: str, host: str | None = None, timeout: int = 20):
     """Run a one-line shell command on a VM (bash on a linux host, cmd.exe on a windows host), in the
@@ -135,7 +135,7 @@ def read_file(path: str, offset: int = 0, length: int = 4000, host: str | None =
     return _emit(shell.read_file(path, offset=offset, length=length, host=host))
 
 
-# --- Windows desktop: doc man hinh / chup man hinh / chay GUI ---------------
+# --- Windows desktop: read / screenshot / run a GUI program --------------------
 @mcp.tool(annotations=_observe("List Windows desktop windows"))
 def win_windows(match: str | None = None, timeout: int = 40, host: str | None = None):
     """List the open windows on the Windows VM's interactive desktop as text
@@ -226,7 +226,7 @@ def linux_gdb(prog: str, script: str, args: str = "", gui: bool = True,
                                  max_lines=max_lines, timeout=timeout, host=host))
 
 
-# --- viec nen ----------------------------------------------------------------
+# --- background jobs --------------------------------------------------------
 @mcp.tool(annotations=_act("Start background job on a VM"))
 def job_start(name: str, command: str | None = None, script: str | None = None,
               host: str | None = None, python: str | None = None, truncated: bool = False):

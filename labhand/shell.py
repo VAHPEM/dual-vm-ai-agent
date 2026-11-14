@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-"""labhand.shell — split from the original monorepo (verbatim).
-Xem TODO[coupling] cho cac cho can truyen tham so thay cho ws/reasoner."""
+"""labhand.shell — run commands and scripts on a lab host, page files, upload files."""
 import os, re, shlex, base64, shutil
 from . import remote, config, hosts
+from .hosts import workdir as _wd, workdir_win as _wdw  # noqa: F401
 from ._result import VMResult, SLICE, _spill, _save_to_host, _find_match  # noqa
 from .output import _clamp_page
 from .safety import _security_block
@@ -17,10 +17,10 @@ def _read_file_sftp(path, offset, length, host):
     # by the samples/samples->. symlink; Windows has none). So the 39 KB frida log with
     # the per-keystroke accumulator data was unreachable, costing 2 stalls + an escalation.
     # A path already rooted at samples/ (how every tool advertises its files) is used as-is.
-    if re.match(r"^([A-Za-z]:|[\\/])", path) or path.startswith(("samples/", "samples\\")):
+    if re.match(r"^([A-Za-z]:|[\\/])", path) or path.startswith((f"{_wd()}/", f"{_wdw()}\\")):
         p = path
     else:
-        p = f"samples/{path}"
+        p = f"{_wd()}/{path}"
     try:
         data = remote.read_bytes(p, host=host)
     except IOError:
@@ -38,7 +38,7 @@ def _read_file_sftp(path, offset, length, host):
                                  "all of it.")
     return VMResult(True, f"read {path} bytes {offset}..{end} (total {len(data)}){cap_note}",
                       detail=f"[{path} {offset}..{end}/{len(data)}]\n" + body,
-                      known=[f"read_file {path}[{offset}:{end}]"], flag=flag)
+                      known=[f"read_file {path}[{offset}:{end}]"], match=flag)
 
 
 def _read_file_one(path, offset=0, length=SLICE, host=None):
@@ -58,7 +58,7 @@ def _read_file_one(path, offset=0, length=SLICE, host=None):
         "sys.stdout.write(repr(len(d))+'|'+base64.b64encode(s).decode())"
     )
     out, err = remote.ssh_exec(
-        f"cd samples 2>/dev/null; python3 -c {shlex.quote(py)}", host=host, read_timeout=40,
+        f"cd {_wd()} 2>/dev/null; python3 -c {shlex.quote(py)}", host=host, read_timeout=40,
     )
     if err.strip() and not out.strip():
         e = err.strip()
@@ -88,7 +88,7 @@ def _read_file_one(path, offset=0, length=SLICE, host=None):
     return VMResult(True, f"read {path} bytes {offset}..{end} "
                             f"(total {total.strip()}){cap_note}",
                       detail=f"[{path} {offset}..{end}/{total.strip()}]\n" + body,
-                      known=[f"read_file {path}[{offset}:{end}]"], flag=flag)
+                      known=[f"read_file {path}[{offset}:{end}]"], match=flag)
 
 
 def read_file(path, offset=0, length=SLICE, host=None, pinned_docs=()):
@@ -155,7 +155,7 @@ def _wrap_cmd(command, host, timeout=20):
     windows: NOT built here any more - _run_and_wrap sends Windows commands through
     remote.win_run_bounded, which gives them the same real, tree-killing timeout."""
     if remote.is_windows(host):
-        return ("cd /d samples 2>nul & " + command +
+        return (f"cd /d {_wdw()} 2>nul & " + command +
                 " & if errorlevel 1 (echo __RC=1) else (echo __RC=0)")
     # Snapshot samples/ before and after, in the SAME shell, and report what changed.
     # Measured ch6 run 2 (2026-09-23): a hand-written run_script wrote 57262 bytes to
@@ -170,7 +170,9 @@ def _wrap_cmd(command, host, timeout=20):
     # every run_cmd that cd'd into a fresh clone reported README.md, CLAUDE.md, ... as new in samples/).
     snap = "find \"$__dvm_dir\" -maxdepth 1 -type f -printf '%f\\t%s\\n' 2>/dev/null | sort"
     inner = (
-        "cd samples 2>/dev/null\n"
+        # mkdir -p: on a fresh host (or a new LABHAND_WORKDIR) the cd used to fail silently and
+        # the command ran in $HOME (measured 2026-11-15).
+        f"mkdir -p {_wd()} 2>/dev/null; cd {_wd()} 2>/dev/null\n"
         "__dvm_dir=$(pwd)\n"
         "set -o pipefail\n"
         f"{snap} > /tmp/_pre.$$ 2>/dev/null\n"
@@ -340,7 +342,7 @@ def _run_and_wrap(command, host, timeout, label, grep_shape=None):
     n = len(combined)
     sl, saved = _spill(host, combined, "cmd_out")
     if newfiles:
-        sl += ("\nFILES WRITTEN OR CHANGED in samples/ by this command: "
+        sl += (f"\nFILES WRITTEN OR CHANGED in {_wd()}/ by this command: "
                + "; ".join(f"{fn} ({fsz} bytes)" for fn, fsz in newfiles[:8])
                + '. Read one with read_file(path="<name>").')
     flag = _find_match(combined)
@@ -349,7 +351,7 @@ def _run_and_wrap(command, host, timeout, label, grep_shape=None):
            f"`timeout` if the work is genuinely long, e.g. an install or Ghidra), "
            if timed_out else
            "exit 1 because grep was given NO FILE to search - it read an empty stdin. "
-           "Add the file name (cwd is samples/), e.g. `grep -n PATTERN <file>`; "
+           f"Add the file name (cwd is {_wd()}/), e.g. `grep -n PATTERN <file>`; "
            if no_file else
            "shell aborted before finishing (syntax error?), " if rc is None else
            f"exit {rc}, " if failed else "")
@@ -362,7 +364,7 @@ def _run_and_wrap(command, host, timeout, label, grep_shape=None):
         known_fact = (f"{label} -> NO MATCH (grep exit 1 = the search ran and found "
                       "nothing; this is a result, not an error)")
     if newfiles:
-        known_fact += " | wrote " + ", ".join(f"samples/{fn} ({fsz}B)"
+        known_fact += " | wrote " + ", ".join(f"{_wd()}/{fn} ({fsz}B)"
                                               for fn, fsz in newfiles[:8])
     if saved:
         known_fact += f" (full -> {saved}, page with read_file)"
@@ -372,10 +374,10 @@ def _run_and_wrap(command, host, timeout, label, grep_shape=None):
                           info="")
     return VMResult(
         not failed,
-        f"ran on {host}: {label} -> {why}{n} chars" + ("; FLAG" if flag else ""),
+        f"ran on {host}: {label} -> {why}{n} chars" + ("; MATCH" if flag else ""),
         detail=sl,
         known=[] if failed else [known_fact],
-        flag=flag,
+        match=flag,
         info=sl,
     )
 
@@ -399,7 +401,7 @@ def upload_file(local_path, name=None, host=None):
     rel = str(name or os.path.basename(src)).replace("\\", "/").strip()
     parts = [p for p in rel.split("/") if p not in ("", ".")]
     if not parts or rel.startswith("/") or ".." in parts or re.match(r"^[A-Za-z]:", rel):
-        return VMResult(False, "upload_file: `name` must be a relative path inside samples/ "
+        return VMResult(False, f"upload_file: `name` must be a relative path inside {_wd()}/ "
                                "(no '..', no absolute or drive path)")
     size = os.path.getsize(src)
     if size > MAX_UPLOAD:
@@ -410,9 +412,9 @@ def upload_file(local_path, name=None, host=None):
     except Exception as e:  # noqa: BLE001 - raw failure back to the caller
         return VMResult(False, f"upload_file: upload to {host} failed: {e}")
     return VMResult(True, f"uploaded {local_path} -> {host}:{remote_path} ({size} bytes)",
-                    detail=f"On {host} it is samples/{dest}: run_cmd / run_script start in samples/, "
+                    detail=f"On {host} it is {_wd()}/{dest}: run_cmd / run_script start in {_wd()}/, "
                            f"so refer to it as {dest}.",
-                    known=[f"{host}:samples/{dest} = {os.path.basename(src)} ({size} bytes)"])
+                    known=[f"{host}:{_wd()}/{dest} = {os.path.basename(src)} ({size} bytes)"])
 
 
 MAX_DOWNLOAD = 32 * 1024 ** 3          # default cap: a full-RAM memory dump still fits
@@ -575,7 +577,7 @@ def run_script(script, host=None, kind=None, timeout=20, python=None):
     if kind not in exts:
         return VMResult(False, f"run_script: unknown kind '{kind}' (use one of {list(exts)})")
     name = f"_script.{exts[kind]}"
-    remote.write_remote(f"samples/{name}", script, host=host)
+    remote.write_remote(f"{_wd()}/{name}", script, host=host)
     # The python3 interpreter is PER HOST. Until 2026-09-23 this always used
     # remote.KALI_PYTHON (/home/vahpem/analysis-venv/bin/python3), bash-quoted, so
     # run_script(kind="python3", host="windows") asked cmd.exe to run a Linux path in

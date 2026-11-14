@@ -61,6 +61,25 @@ class HostError(ValueError):
     """An unknown host name or a broken inventory; the message is meant for the caller."""
 
 
+_WD_OK = re.compile(r"^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$")
+
+
+def workdir():
+    """The working directory of every tool on every host, relative to the SSH user's home:
+    $LABHAND_WORKDIR, default `samples` (both OSes). Letters, digits, `._-` and `/` only, so
+    it needs no quoting in bash, cmd.exe or PowerShell. Raises HostError if invalid."""
+    wd = os.environ.get("LABHAND_WORKDIR", "").strip().replace("\\", "/").rstrip("/") or "samples"
+    if not _WD_OK.match(wd) or any(part in (".", "..") for part in wd.split("/")):
+        raise HostError(f"LABHAND_WORKDIR={wd!r}: must be a relative path inside the home "
+                        "directory, made of letters, digits, '.', '_', '-' and '/' (no '..')")
+    return wd
+
+
+def workdir_win():
+    """workdir() with Windows separators."""
+    return workdir().replace("/", "\\")
+
+
 def prefix(name):
     return re.sub(r"[^A-Za-z0-9]", "_", name).upper()
 
@@ -181,6 +200,7 @@ def check(name, tool, os_name=None):
     return as is. Nothing connects to anything here."""
     from ._result import VMResult
     try:
+        workdir()                     # a broken LABHAND_WORKDIR is refused here, too
         return get(name, os_name), None
     except HostError as e:
         return None, VMResult(False, f"{tool}: {e}")

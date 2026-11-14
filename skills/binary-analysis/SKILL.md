@@ -1,22 +1,40 @@
-# -*- coding: utf-8 -*-
-"""Reverse-engineering / analysis methodology - the operator\'s hard-won experience.
+---
+name: binary-analysis
+description: >-
+  Disciplined methodology for analysing an unknown file, binary or program on the
+  dual-VM lab: how to reason (state assumptions, measure before reading, static vs
+  dynamic, invert instead of brute-force) and which VM tool to reach for at each
+  step. Load it before analysing a target with labhand. Covers reverse engineering,
+  crypto, parameter reasoning, Python bytecode, large traces, and tooling gotchas.
+---
 
-SINGLE SOURCE of the reasoning playbook, used both standalone (surfaced as the
-`binary-analysis` skill, .claude/skills/binary-analysis/SKILL.md - regenerate with
-scripts/gen_skill.py) and by any agent that imports these two strings.
+# binary-analysis
 
-  ANALYSIS_DISCIPLINE -> mandatory rules + default order of operations.
-  METHOD_PLAYBOOK      -> detailed, domain-specific technique notes
-                          (reverse engineering, crypto, parameters, bytecode,
-                           large traces, tooling).
+Reasoning playbook for analysing an unknown target while driving the two VMs with
+`labhand`. The **discipline** (R1-R10) and the **technique notes** below are the
+method; this short intro maps each move to the tool that performs it. Keep raw
+measurement (the Muscle, `labhand`) and conclusions (the caller) separate: the
+library only runs things and returns raw output - the discipline here is the
+caller's.
 
-Add a lesson by appending to the relevant section, but keep it small: a reader
-already carries a lot of standing instruction, and one more voice competes for
-attention more than it helps. Prefer FIXING or MERGING an existing note over
-adding one. Keep it in English (parsed more reliably, fewer tokens).
-"""
+## How the method maps to labhand tools
 
-ANALYSIS_DISCIPLINE = """
+- **Cheap static survey:** `shell.run_cmd` for `file` / `xxd` / `strings` /
+  `objdump` / `readelf` / `rabin2`; page a dumped blob with `shell.read_file`.
+- **Structure / decompile:** run Ghidra or radare2 through `shell.run_cmd`; read a
+  file a solver wrote on the VM back with `shell.read_file`.
+- **Go dynamic** (the moment two static looks stop answering - the two-dead-ends
+  rule): Linux ELF -> `linux.linux_gdb` (scripted gdb, ASLR off, fixed PIE base);
+  Windows -> `windows.win_frida` (inspect/replace a value, or drive the UI);
+  a headless Kali GUI -> `linux.linux_gui_run`.
+- **See / read a GUI:** `windows.win_windows` (text, cheap) first, then
+  `windows.win_screenshot`; render a PDF/image and look at the returned picture.
+- **Write a solver that is efficient, not brute:** `shell.run_script` (print every
+  value); a heavy search runs as a background job via `jobs.job_start` /
+  `jobs.job_poll`.
+- **Confirm a result:** the caller's matcher (`labhand.set_matcher`) surfaces a
+  target string in any raw output.
+
 === MANDATORY RULES — DO NOT DERAIL ===
 (Violating any of these causes more damage than any gap in knowledge.)
 
@@ -79,9 +97,7 @@ dynamic work.
   3. Structure: sections, imports, exports, resources.
   4. Strings, then embedded-format signatures (PNG/GIF/JPEG/ZIP/zlib); note
      regions that are oversized or high-entropy.
-"""
 
-METHOD_PLAYBOOK = """
 === TECHNIQUE PLAYBOOK (apply when it fits the situation at hand — not every
 note is relevant to every challenge) ===
 
@@ -191,4 +207,3 @@ note is relevant to every challenge) ===
 - The '!' char in python3 -c "..." can be eaten by bash/zsh history expansion,
   causing confusing errors — write the script to a file via a quoted heredoc
   (<< 'EOF') and run python3 file.py; avoid -c when special chars are involved.
-"""

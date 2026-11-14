@@ -40,6 +40,7 @@ import subprocess
 import time
 
 from . import hosts, remote
+from .hosts import workdir as _wd, workdir_win as _wdw  # noqa: F401
 from ._result import VMResult
 
 UTMCTL_DEFAULT = "/Applications/UTM.app/Contents/MacOS/utmctl"
@@ -112,7 +113,7 @@ def _job_logs(host):
         if err and err.lower() not in ("file not found", "the system cannot find the file specified."):
             raise RuntimeError(f"listing jobs on {host} failed: {err[:200]}")
     else:
-        o, e = remote.ssh_exec("cd samples 2>/dev/null || { echo __END__; exit 0; }; "
+        o, e = remote.ssh_exec(f"cd {_wd()} 2>/dev/null || {{ echo __END__; exit 0; }}; "
                                "ls -1 _job_*.log 2>/dev/null; echo __END__",
                                host=host, read_timeout=30)
     lines = [l.strip() for l in (o or "").splitlines() if l.strip()]

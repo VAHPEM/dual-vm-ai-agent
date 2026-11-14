@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-"""labhand.images — split from the original monorepo (verbatim).
-Xem TODO[coupling] cho cac cho can truyen tham so thay cho ws/reasoner."""
+"""labhand.images — read pictures (screenshots, rendered pages) back from a lab host."""
 import os, base64, re
 from . import remote, hosts
+from .hosts import workdir as _wd, workdir_win as _wdw  # noqa: F401
 
 
 # --- Seeing things: images, PDFs, and real GUIs -----------------------------------
@@ -52,11 +52,11 @@ def _prepare_image(raw, ext):
     if ext in _CONVERTIBLE:
         try:
             lin = hosts.default("linux")        # ImageMagick lives on a linux host
-            remote.write_remote("samples/_viewconv_in", raw, host=lin)
-            remote.ssh_exec("cd samples && convert _viewconv_in -resize "
+            remote.write_remote(f"{_wd()}/_viewconv_in", raw, host=lin)
+            remote.ssh_exec(f"cd {_wd()} && convert _viewconv_in -resize "
                             f"{IMAGE_MAX_EDGE}x{IMAGE_MAX_EDGE}\\> _viewconv_out.png",
                             host=lin, read_timeout=40)
-            png = remote.read_bytes("samples/_viewconv_out.png", host=lin)
+            png = remote.read_bytes(f"{_wd()}/_viewconv_out.png", host=lin)
             return "image/png", base64.b64encode(png).decode(), f" (converted on {lin})"
         except Exception as e:  # noqa: BLE001
             return None, None, f"format .{ext} needs conversion and it failed ({e})"

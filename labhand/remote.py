@@ -7,6 +7,7 @@ import socket
 import paramiko
 
 from . import hosts
+from .hosts import workdir as _wd, workdir_win as _wdw  # noqa: F401
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _env_path = hosts.env_path          # the .env itself is loaded by labhand.hosts
@@ -252,7 +253,8 @@ def _ensure_self_symlink(sftp, host):
     if is_windows(host):
         return
     try:
-        sftp.symlink(".", "samples/samples")
+        wd = _wd()
+        sftp.symlink(".", f"{wd}/{wd.rsplit('/', 1)[-1]}")
     except IOError:
         pass
 
@@ -272,18 +274,12 @@ def _sftp_makedirs(sftp, dirpath):
 
 
 def upload(local_path, filename, host=None):
-    """Put a local file into the remote samples/ dir (subdir layout preserved: a
-    `filename` like 'data/x.bin' lands at samples/data/x.bin); return its remote path."""
-    remote = f"samples/{filename}"
+    """Put a local file into the remote working dir (workdir(), default samples/; subdir
+    layout preserved: 'data/x.bin' lands at samples/data/x.bin); return its remote path."""
+    remote = f"{_wd()}/{filename}"
 
     def _op(sftp):
-        try:
-            sftp.mkdir("samples")
-        except IOError:
-            pass
-        parent = remote.rsplit("/", 1)[0]
-        if parent != "samples":                 # nested: make samples/data/gfx/...
-            _sftp_makedirs(sftp, parent)
+        _sftp_makedirs(sftp, remote.rsplit("/", 1)[0])   # workdir (and samples/data/gfx/...)
         _ensure_self_symlink(sftp, host)
         sftp.put(local_path, remote)
     if is_windows(host):
@@ -313,10 +309,7 @@ def upload(local_path, filename, host=None):
 
 def write_remote(remote_path, content, host=None):
     def _op(sftp):
-        try:
-            sftp.mkdir("samples")
-        except IOError:
-            pass
+        _sftp_makedirs(sftp, _wd())             # the working dir (nested if configured)
         _ensure_self_symlink(sftp, host)
         with sftp.file(remote_path, "w") as f:
             f.write(content)
@@ -346,9 +339,9 @@ def sftp_path(path, host=None):
         p = p.replace("\\", "/")
         if re.match(r"^[A-Za-z]:/", p):
             return "/" + p
-    if p.startswith("/") or p == "samples" or p.startswith("samples/"):
+    if p.startswith("/") or p == _wd() or p.startswith(f"{_wd()}/"):
         return p
-    return "samples/" + p
+    return f"{_wd()}/" + p
 
 
 def download_to(remote_path, local_fh, host=None, max_bytes=None, timeout=600,
@@ -459,8 +452,8 @@ def win_run_bounded(command, timeout, host=None):
     with a REAL, tree-killing timeout. Returns (stdout, stderr); stdout ends with
     __RC=<n> (124 = timed out)."""
     host = hosts.get(host, "windows").name
-    write_remote("samples/_win_cmd.txt", command, host=host)
-    write_remote("samples/_timeout_run.py", _WIN_LAUNCHER, host=host)
+    write_remote(f"{_wd()}/_win_cmd.txt", command, host=host)
+    write_remote(f"{_wd()}/_timeout_run.py", _WIN_LAUNCHER, host=host)
     launcher = win_samples(host) + "\\_timeout_run.py"
     return ssh_exec(f'"{python_for(host)}" "{launcher}" {int(timeout)}',
                     host=host, read_timeout=int(timeout) + 25)
@@ -472,7 +465,7 @@ def run_script(script, host=None, timeout=20, python=None):
     (absolute path) - needed when a challenge's payload is version-locked to an
     interpreter other than the host's <NAME>_PYTHON (e.g. a CPython the Brain installed with
     `uv python install 3.12`). Returns combined output."""
-    write_remote("samples/exploit.py", script, host=host)
+    write_remote(f"{_wd()}/exploit.py", script, host=host)
     if is_windows(host):
         exe = python or python_for(host)
         # real timeout + real exit code (was: read_timeout only, rc squashed to 0/1)
@@ -483,7 +476,7 @@ def run_script(script, host=None, timeout=20, python=None):
         # whole group, so a solver that forks does not leave orphans behind
         # (measured 2026-09-22: without it, a killed SSH channel left the remote
         # command running to completion on the VM).
-        cmd = (f"cd samples && timeout -k 5 {int(timeout)} {shlex.quote(exe)} "
+        cmd = (f"cd {_wd()} && timeout -k 5 {int(timeout)} {shlex.quote(exe)} "
                f"exploit.py 2>&1; echo __RC=$?")
         o, e = ssh_exec(cmd, host=host, read_timeout=timeout + 25)
     return (o + "\n" + e).strip()
@@ -517,7 +510,7 @@ def win_home(host=None):
 
 
 def win_samples(host=None):
-    return win_home(host) + "\\samples"
+    return win_home(host) + "\\" + _wdw()
 
 
 _GUI_DRIVER = """
@@ -557,9 +550,9 @@ def run_in_session1(ps_body, timeout=60, task="labhand_gui", host=None):
     samples = win_samples(host)
     ssh_exec('if not exist "' + samples + '" mkdir "' + samples + '"',
              host=host, read_timeout=25)
-    write_remote("samples/_gui_task.ps1",
+    write_remote(f"{_wd()}/_gui_task.ps1",
                  _GUI_TASK_WRAPPER.format(samples=samples, body=ps_body), host=host)
-    write_remote("samples/_gui_driver.ps1",
+    write_remote(f"{_wd()}/_gui_driver.ps1",
                  _GUI_DRIVER.format(samples=samples, task=task, timeout=int(timeout)),
                  host=host)
     o, e = ssh_exec(

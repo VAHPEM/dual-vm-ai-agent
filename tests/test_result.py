@@ -30,12 +30,12 @@ def test_vmresult_known_is_not_shared_between_instances():
 
 
 def test_no_matcher_means_no_flag():
-    assert _find_match("anything@flare-on.com") is None
+    assert _find_match("anything WIN{x}") is None
 
 
 def test_set_matcher_is_exported_and_used():
-    labhand.set_matcher(lambda t: (re.search(r"\w+@flare-on\.com", t) or [None])[0])
-    assert _find_match("out: abc@flare-on.com\n") == "abc@flare-on.com"
+    labhand.set_matcher(lambda t: (re.search(r"WIN\{[^}]+\}", t) or [None])[0])
+    assert _find_match("out: WIN{abc}\n") == "WIN{abc}"
     assert _find_match("nothing here") is None
 
 
@@ -44,3 +44,17 @@ def test_matcher_receives_empty_string_for_none():
     labhand.set_matcher(lambda t: seen.append(t))
     _find_match(None)
     assert seen == [""]
+
+
+def test_match_is_the_field_and_flag_its_deprecated_alias():
+    r = VMResult(True, "ok", match="m1")
+    assert r.match == "m1" and r.flag == "m1"
+    old = VMResult(True, "ok", flag="f1")                   # pre-rename keyword still works
+    assert old.match == "f1" and old.flag == "f1"
+    old.flag = "f2"
+    assert old.match == "f2"
+    assert VMResult(True, "ok").flag is None
+    assert "match='m1'" in repr(r)
+    import dataclasses
+    assert [f.name for f in dataclasses.fields(VMResult)][4] == "match"   # positional slot kept
+    assert VMResult(True, "s", "d", [], "pos").match == "pos"

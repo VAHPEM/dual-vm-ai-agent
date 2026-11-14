@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-"""labhand.windows — split from the original monorepo (verbatim).
-Xem TODO[coupling] cho cac cho can truyen tham so thay cho ws/reasoner."""
+"""labhand.windows — Windows-host tools: desktop, GUI automation, Frida."""
 import os, re, json, shlex
 from . import remote, hosts
+from .hosts import workdir as _wd, workdir_win as _wdw  # noqa: F401
 from ._result import VMResult, _spill, _find_match  # noqa
 from .safety import _security_block
 from .images import _prepare_image
@@ -74,7 +74,7 @@ def _session1(host, ps_body, **kw):
 def _win_shot_image(label, host):
     """Pull samples/_screen.png off the Windows VM and turn it into an image block."""
     try:
-        raw = remote.read_bytes("samples/_screen.png", host=host)
+        raw = remote.read_bytes(f"{_wd()}/_screen.png", host=host)
     except Exception as e:  # noqa: BLE001
         return None, f"(screenshot file could not be read back: {e})"
     media, b64, note = _prepare_image(raw, "png")
@@ -105,7 +105,7 @@ def win_windows(match=None, timeout=40, host=None):
     detail, _ = _spill(host, text, "windows")
     return VMResult(True, f"Windows desktop: {n} window line(s)", detail=detail,
                       known=[f"Windows desktop windows: {text[:400]}"], info=detail,
-                      flag=_find_match(text))
+                      match=_find_match(text))
 
 
 def win_screenshot(timeout=40, host=None):
@@ -157,8 +157,8 @@ def _sync_to_windows(win_path, host):
         ex = _win_exists(win_path, host)
         if ex is False:
             return False, (f"win_frida/win_gui_run: '{win_path}' is not on the Windows "
-                           "VM and is outside samples/, so it can't be auto-copied from "
-                           "Kali. Put it under samples/ (triage/extract do this) first.")
+                           f"VM and is outside {_wd()}/, so it can't be auto-copied from "
+                           f"Kali. Put it under {_wd()}/ (triage/extract do this) first.")
         return True, ""
     rel = win_path[len(prefix):].replace("\\", "/")
     if _win_exists(win_path, host):
@@ -168,7 +168,7 @@ def _sync_to_windows(win_path, host):
     if src is None:
         return False, (f"win_frida/win_gui_run: '{rel}' is not on {host} and the inventory "
                        "has no linux host to copy it from.")
-    kali_rel = "samples/" + rel
+    kali_rel = f"{_wd()}/" + rel
     try:
         o, _ = remote.ssh_exec(f'test -f "{kali_rel}" && echo __Y__ || echo __N__',
                                host=src, read_timeout=20)
@@ -184,17 +184,17 @@ def _sync_to_windows(win_path, host):
     parent = rel.rsplit("/", 1)[0] if "/" in rel else ""
     base = rel.rsplit("/", 1)[-1]
     if parent:
-        listing = f'find "samples/{parent}" -maxdepth 1 -type f'
+        listing = f'find "{_wd()}/{parent}" -maxdepth 1 -type f'
     else:
         # samples root: only the file itself and any 'base:stream' companions of it,
         # NOT the entire samples/ tree.
-        listing = (f'find samples -maxdepth 1 -type f \\( -name "{base}" -o '
+        listing = (f'find {_wd()} -maxdepth 1 -type f \\( -name "{base}" -o '
                    f'-name "{base}:*" \\)')
     try:
         lo, _ = remote.ssh_exec(listing, host=src, read_timeout=25)
     except Exception as e:  # noqa: BLE001
         return False, f"win sync: could not list Kali source dir ({e.__class__.__name__})"
-    kfiles = [l.strip() for l in (lo or "").splitlines() if l.strip().startswith("samples/")]
+    kfiles = [l.strip() for l in (lo or "").splitlines() if l.strip().startswith(f"{_wd()}/")]
     if not kfiles:
         kfiles = [kali_rel]
     if len(kfiles) > 300:
@@ -209,7 +209,7 @@ def _sync_to_windows(win_path, host):
         pass
     copied, ads, skipped = 0, 0, 0
     for kf in kfiles:
-        krel = kf[len("samples/"):]                 # e.g. GhostStream_ex/.../x.exe or ...txt:LordVoldemort
+        krel = kf[len(f"{_wd()}/"):]                 # e.g. GhostStream_ex/.../x.exe or ...txt:LordVoldemort
         try:
             data = remote.read_bytes(kf, host=src)
         except Exception:  # noqa: BLE001
@@ -221,7 +221,7 @@ def _sync_to_windows(win_path, host):
         # write_remote takes a remote path relative to the Windows home; keep the same
         # samples-relative layout. A ':' in krel makes it an ADS on NTFS (that is the point).
         try:
-            remote.write_remote("samples/" + krel, data, host=host)
+            remote.write_remote(f"{_wd()}/" + krel, data, host=host)
             if ":" in krel.rsplit("/", 1)[-1]:
                 ads += 1
             else:
@@ -234,7 +234,7 @@ def _sync_to_windows(win_path, host):
     note = (f"[sync] '{rel}' was only on Kali; copied {copied} file(s)"
             + (f" + {ads} ADS stream(s)" if ads else "")
             + (f" ({skipped} skipped)" if skipped else "")
-            + f" to samples/ on Windows so it can run.")
+            + f" to {_wd()}/ on Windows so it can run.")
     return True, note
 
 
@@ -291,7 +291,7 @@ def win_gui_run(program, args="", wait=6, kill=True, screenshot=True, timeout=60
     detail, _ = _spill(host, text, "gui_run")
     return VMResult(True, summ, detail=detail,
                       known=[f"win_gui_run({program}) -> {text[:400]}"], info=detail,
-                      flag=_find_match(text), image=img)
+                      match=_find_match(text), image=img)
 
 
 # --- Windows: Frida, the scriptable debugger ----------------------------------------
@@ -642,11 +642,11 @@ def win_frida(script, program=None, args="", pid=None, wait=8, kill=True,
         pass
     script = _FRIDA_PRELUDE_TMPL.replace("__LOGPATH__", log_js) + script
     try:
-        remote.write_remote("samples/_frida.js", script, host=host)
-        remote.write_remote("samples/_frida_cfg.json", json.dumps(cfg), host=host)
-        remote.write_remote("samples/_frida_drv.py", _FRIDA_DRIVER, host=host)
+        remote.write_remote(f"{_wd()}/_frida.js", script, host=host)
+        remote.write_remote(f"{_wd()}/_frida_cfg.json", json.dumps(cfg), host=host)
+        remote.write_remote(f"{_wd()}/_frida_drv.py", _FRIDA_DRIVER, host=host)
         if drive_ps1_local is not None:
-            remote.write_remote("samples/_frida_drive.ps1", drive_ps1_local, host=host)
+            remote.write_remote(f"{_wd()}/_frida_drive.ps1", drive_ps1_local, host=host)
     except Exception as e:  # noqa: BLE001
         return VMResult(False, f"win_frida: could not upload the script/driver: "
                                  f"{e.__class__.__name__}: {e}")
@@ -686,12 +686,12 @@ def win_frida(script, program=None, args="", pid=None, wait=8, kill=True,
     ferr = "FRIDA_ERROR" in text
     logged = ""
     try:
-        logged = remote.read_bytes("samples/_frida_log.txt",
+        logged = remote.read_bytes(f"{_wd()}/_frida_log.txt",
                                    host=host).decode("utf-8", "replace")
     except Exception:  # noqa: BLE001 - no log file is the normal case
         logged = ""
     if logged.strip():
-        text += (f"\n=== log() file: {len(logged)} chars, samples/_frida_log.txt on "
+        text += (f"\n=== log() file: {len(logged)} chars, {_wd()}/_frida_log.txt on "
                  "windows (read_file it for the rest) ===\n" + logged)
     # The hook-lifetime trap, caught at the one moment it is provable.
     if not logged.strip() and nsend == 0 and "Interceptor.attach" in script \
@@ -717,7 +717,7 @@ def win_frida(script, program=None, args="", pid=None, wait=8, kill=True,
     ok = not ((ferr or jserr) and nsend == 0 and not logged.strip())
     return VMResult(ok, head, detail=detail,
                       known=[f"win_frida({program or ('pid ' + str(pid))}) -> {text[:400]}"],
-                      info=detail, flag=_find_match(text))
+                      info=detail, match=_find_match(text))
 
 
 # --- Windows: ACTING on the GUI, not just looking at it -----------------------------
@@ -949,7 +949,7 @@ if ($tops.Count -eq 0 -and $w32.Count -eq 0) { Write-Output "NO_WINDOW_MATCHED" 
     return VMResult(True, f"win_ui_tree: {nu} UIA control(s), {nw} Win32 line(s)",
                       detail=detail,
                       known=[f"win_ui_tree({match or 'all'}) -> {text[:400]}"],
-                      info=detail, flag=_find_match(text))
+                      info=detail, match=_find_match(text))
 
 
 def win_ui_click(hwnd=None, target=None, window=None, x=None, y=None, after=1,
@@ -1037,7 +1037,7 @@ Start-Sleep -Seconds __AFTER__
     detail, _ = _spill(host, text, "uiclick")
     return VMResult(True, f"clicked {what} via {how}", detail=detail,
                       known=[f"win_ui_click({what}) -> {text[:400]}"],
-                      info=detail, flag=_find_match(text))
+                      info=detail, match=_find_match(text))
 
 
 _SENDKEYS_SPECIAL = "+^%~(){}[]"
@@ -1133,7 +1133,7 @@ Start-Sleep -Seconds __AFTER__
     detail, _ = _spill(host, out, "uitype")
     return VMResult(True, f"typed '{raw[:40]}' into {where} via {how}", detail=detail,
                       known=[f"win_ui_type({where}) -> {out[:400]}"],
-                      info=detail, flag=_find_match(out))
+                      info=detail, match=_find_match(out))
 
 
 def win_key(keys, window=None, after=1, timeout=45, host=None):
@@ -1187,7 +1187,7 @@ Start-Sleep -Seconds __AFTER__
     return VMResult(True, f"sent keys '{raw[:40]}'"
                       + (f" to '{window}'" if window else " to the foreground window"),
                       detail=detail, known=[f"win_key({raw[:40]}) -> {out[:300]}"],
-                      info=detail, flag=_find_match(out))
+                      info=detail, match=_find_match(out))
 
 
 # Build the proven UIA InvokePattern drive PowerShell (used by win_ui_seq, and by
@@ -1347,4 +1347,4 @@ if ($tops.Count -eq 0) { Write-Output "NO_WINDOW_MATCHED" } else {
     summary = f"win_ui_seq: pressed {nok}/{ntot}" + (f", {nfail} FAILED" if nfail else "")
     return VMResult(nok > 0, summary, detail=detail,
                       known=[f"win_ui_seq({raw[:60]}) -> {text[:400]}"],
-                      info=detail, flag=_find_match(text))
+                      info=detail, match=_find_match(text))

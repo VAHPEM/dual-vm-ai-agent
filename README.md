@@ -59,6 +59,9 @@ WINDOWS_USER=analyst
 WINDOWS_OS=windows
 ```
 
+`LABHAND_WORKDIR` (default `samples`) is the directory, relative to the SSH user's home,
+where every tool works on every host.
+
 Every tool takes `host=<name>` and branches on that host's OS; an unknown name is refused
 (with the list of known hosts) before anything connects. Without `LABHAND_HOSTS` the
 older keys still work: `KALI_HOST` / `KALI_USER` (+ `KALI_PYTHON`) give `kali`, `WIN_HOST`
@@ -83,11 +86,12 @@ Every tool returns the same plain dataclass — no interpretation, no side vocab
 
 ```
 ok: bool        summary: str      detail: str       known: list[str]
-flag: str|None  info: str|None    image: dict|None  waiting: bool
+match: str|None info: str|None    image: dict|None  waiting: bool
 ```
 
-`flag` is only ever filled if the Brain injected a matcher (see below); on its own
-the Muscle leaves it `None`.
+`match` is only ever filled if the Brain injected a matcher (see below); on its own
+the Muscle leaves it `None`. `flag` is its deprecated alias: `r.flag` and
+`VMResult(..., flag=...)` keep working and mean exactly `match`.
 
 ### Extension point: `set_matcher`
 
@@ -96,10 +100,10 @@ teaches it once:
 
 ```python
 import re, labhand
-labhand.set_matcher(lambda t: (re.search(r"...@flare-on\.com", t) or [None])[0])
+labhand.set_matcher(lambda t: (re.search(r"WIN\{[^}]+\}", t) or [None])[0])
 ```
 
-Thereafter tools fill `VMResult.flag` when the pattern appears in raw output. This is
+Thereafter tools fill `VMResult.match` when the pattern appears in raw output. This is
 dependency inversion: the Muscle stays generic; the Brain supplies the only
 task-specific bit.
 
@@ -168,6 +172,19 @@ The hints are UI guidance for the client, not a security boundary. `labhand.safe
 refuses only three disk-wrecking commands (recursive delete of `/`, `mkfs` / `diskpart`,
 `format X:`); the boundary is the lab's network isolation
 ([docs/LAB-ISOLATION.md](docs/LAB-ISOLATION.md)).
+
+## Skills
+
+`skills/<name>/SKILL.md` holds the agent skills that go with the lab — `binary-analysis`
+(how to reason about an unknown binary and which labhand tool to use at each step) and
+`vuln-research` (triage of memory-safety crashes). They are plain, hand-edited markdown
+and the single source. Install them where your agent looks for skills:
+
+```bash
+python skills/sync.py                          # -> .claude/skills/ of this checkout
+python skills/sync.py --dest ~/.claude/skills  # user-wide, or any other skill dir
+python skills/sync.py --check                  # drift report, exit 1 if out of date
+```
 
 ## Renamed from `dualvm`
 

@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-"""labhand.jobs — split from the original monorepo (verbatim).
-Xem TODO[coupling] cho cac cho can truyen tham so thay cho ws/reasoner."""
+"""labhand.jobs — background jobs on a lab host (start, poll, tail, stop)."""
 import re, ast, shlex
 from . import remote, hosts
+from .hosts import workdir as _wd, workdir_win as _wdw  # noqa: F401
 from ._result import VMResult, _spill, _find_match  # noqa
 from .safety import _security_block
 
@@ -97,7 +97,7 @@ def job_start(name, command=None, script=None, host=None, python=None, truncated
             return VMResult(False, f"job_start: that script does not parse "
                                      f"(line {e.lineno}: {e.msg}) - fix it first")
         try:
-            remote.write_remote(f"samples/{pyf}", script, host=host)
+            remote.write_remote(f"{_wd()}/{pyf}", script, host=host)
         except Exception as e:  # noqa: BLE001
             return VMResult(False, f"job_start: could not upload the script: {e}")
 
@@ -116,9 +116,9 @@ def job_start(name, command=None, script=None, host=None, python=None, truncated
               f'else {{ $r.ProcessId | Out-File -Encoding ascii "{pidf}"\n'
               f'       Write-Output ("JOB_PID=" + $r.ProcessId) }}\n')
         try:
-            remote.write_remote(f"samples/_job_{nm}_cmd.txt", inner, host=host)
-            remote.write_remote(f"samples/{launch}", _WIN_JOB_LAUNCHER, host=host)
-            remote.write_remote(f"samples/_job_{nm}_start.ps1", ps, host=host)
+            remote.write_remote(f"{_wd()}/_job_{nm}_cmd.txt", inner, host=host)
+            remote.write_remote(f"{_wd()}/{launch}", _WIN_JOB_LAUNCHER, host=host)
+            remote.write_remote(f"{_wd()}/_job_{nm}_start.ps1", ps, host=host)
             o, e = remote.ssh_exec(
                 f'powershell -NoProfile -ExecutionPolicy Bypass -File '
                 f'"{samples}\\_job_{nm}_start.ps1"',
@@ -130,7 +130,7 @@ def job_start(name, command=None, script=None, host=None, python=None, truncated
         interp = python or h.python
         inner = (f"{shlex.quote(interp)} -u {pyf}" if script else command)
         wrapped = f"{inner}\n__rc=$?\necho __JOB_RC=$__rc"
-        sh = ("cd samples 2>/dev/null || exit 9\n"
+        sh = (f"mkdir -p {_wd()} 2>/dev/null; cd {_wd()} 2>/dev/null || exit 9\n"
               f"rm -f {log} {pidf}\n"
               f"setsid nohup bash -c {shlex.quote(wrapped)} > {log} 2>&1 < /dev/null &\n"
               f"echo $! > {pidf}\n"
@@ -151,7 +151,7 @@ def job_start(name, command=None, script=None, host=None, python=None, truncated
     return VMResult(True, f"job '{nm}' started on {host} (pid {pid}) - it keeps "
                             f"running after this call; check it with job_poll(name='{nm}')",
                       detail=out[:600],
-                      known=[f"job '{nm}' running on {host}, pid {pid}, log samples/{log}"])
+                      known=[f"job '{nm}' running on {host}, pid {pid}, log {_wd()}/{log}"])
 
 
 def job_poll(name=None, tail=40, grep=None, stop=False, host=None):
@@ -162,7 +162,7 @@ def job_poll(name=None, tail=40, grep=None, stop=False, host=None):
     if name is None:
         try:
             cmd = (f'dir /b "{remote.win_samples(host)}\\_job_*.log"' if h.is_windows else
-                   "cd samples 2>/dev/null && ls -la _job_*.log 2>/dev/null | head -40 "
+                   f"cd {_wd()} 2>/dev/null && ls -la _job_*.log 2>/dev/null | head -40 "
                    "|| echo 'no jobs'")
             o, e = remote.ssh_exec(cmd if h.is_windows else f"bash -c {shlex.quote(cmd)}",
                                    host=host, read_timeout=30)
@@ -205,7 +205,7 @@ def job_poll(name=None, tail=40, grep=None, stop=False, host=None):
         ps.append('}')
         body = "\n".join(ps)
         try:
-            remote.write_remote(f"samples/_job_{nm}_poll.ps1", body, host=host)
+            remote.write_remote(f"{_wd()}/_job_{nm}_poll.ps1", body, host=host)
             o, e = remote.ssh_exec(
                 f'powershell -NoProfile -ExecutionPolicy Bypass -File '
                 f'"{remote.win_samples(host)}\\_job_{nm}_poll.ps1"',
@@ -214,7 +214,7 @@ def job_poll(name=None, tail=40, grep=None, stop=False, host=None):
         except Exception as ex:  # noqa: BLE001
             return VMResult(False, f"job_poll failed: {ex.__class__.__name__}: {ex}")
     else:
-        parts = ["cd samples 2>/dev/null || exit 9",
+        parts = [f"cd {_wd()} 2>/dev/null || exit 9",
                  f'[ -f {log} ] || {{ echo NO_SUCH_JOB; exit 0; }}',
                  f'pid=$(cat {pidf} 2>/dev/null)']
         if stop:
@@ -252,8 +252,8 @@ def job_poll(name=None, tail=40, grep=None, stop=False, host=None):
     if rc:
         head += f", exit code {rc.group(1)}"
     if size:
-        head += f", log {size.group(1)} bytes (samples/{log} - page it with read_file)"
+        head += f", log {size.group(1)} bytes ({_wd()}/{log} - page it with read_file)"
     detail, _ = _spill(host, txt, f"job_{nm}")
     return VMResult(True, head, detail=detail, info=detail,
                       known=[f"job '{nm}' {state}" + (f" rc={rc.group(1)}" if rc else "")],
-                      flag=_find_match(txt), waiting=(state == "RUNNING"))
+                      match=_find_match(txt), waiting=(state == "RUNNING"))
