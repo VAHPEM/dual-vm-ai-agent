@@ -115,6 +115,20 @@ def upload_file(local_path: str, name: str | None = None, host: str | None = Non
     return _emit(shell.upload_file(local_path, name=name, host=host))
 
 
+# Writes only on this machine, never on the VM; overwrite=True can replace a local file,
+# so it is not read-only. Repeating the call gives the same file.
+@mcp.tool(annotations=_act("Download a file from a VM", idempotent=True, open_world=False))
+def download_file(path: str, dest: str | None = None, host: str | None = None,
+                  overwrite: bool = False, max_bytes: int | None = None, timeout: int = 600):
+    """Copy a file from a VM to this machine (where the labhand MCP server runs), streamed
+    to disk. `path` is relative to the VM's samples/ dir, or absolute. Default destination:
+    $LABHAND_DOWNLOAD_DIR/<host>/ or ~/labhand-downloads/<host>/ (never inside a git
+    checkout). An existing local file is kept unless overwrite=true. Returns size and
+    sha256; the downloaded file is never executed."""
+    return _emit(shell.download_file(path, dest=dest, host=host, overwrite=overwrite,
+                                     max_bytes=max_bytes, timeout=timeout))
+
+
 @mcp.tool(annotations=_observe("Read file on a VM"))
 def read_file(path: str, offset: int = 0, length: int = 4000, host: str | None = None):
     """Read a byte slice of a file that lives on a VM (pages large files)."""

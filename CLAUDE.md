@@ -81,6 +81,7 @@ connection. Every `win_*` / `linux_*` call below also takes `host=None`.
 | `run_script(script, host=None, kind=None, timeout=20, python=None)` | write & run a multi-line script (`kind`: bash/python3 on linux; powershell/cmd on windows). |
 | `read_file(path, offset=0, length=4000, host=None, pinned_docs=())` | page a file on a host; if it is not on `host`, tries every other inventory host in order and says where it was found. |
 | `upload_file(local_path, name=None, host=None)` | copy a local file into the host's `samples/`. |
+| `download_file(path, dest=None, host=None, overwrite=False, max_bytes=None, timeout=600)` | copy a file from a host to this machine: streamed over SFTP in bounded 8 MiB windows to a temp file, renamed when complete; default `$LABHAND_DOWNLOAD_DIR/<host>/` or `~/labhand-downloads/<host>/`, never inside a git checkout; keeps an existing file unless `overwrite`; size cap (32 GiB default) and disk-space check; `known` has size + sha256. The file is mode 0600 and never executed. |
 
 ### Windows desktop — read / see / run — `labhand.windows`
 | call | does |

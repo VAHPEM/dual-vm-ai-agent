@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """labhand.shell — split from the original monorepo (verbatim).
 Xem TODO[coupling] cho cac cho can truyen tham so thay cho ws/reasoner."""
-import os, re, shlex, base64
+import os, re, shlex, base64, shutil
 from . import remote, config, hosts
 from ._result import VMResult, SLICE, _spill, _save_to_host, _find_match  # noqa
 from .output import _clamp_page
@@ -413,6 +413,138 @@ def upload_file(local_path, name=None, host=None):
                     detail=f"On {host} it is samples/{dest}: run_cmd / run_script start in samples/, "
                            f"so refer to it as {dest}.",
                     known=[f"{host}:samples/{dest} = {os.path.basename(src)} ({size} bytes)"])
+
+
+MAX_DOWNLOAD = 32 * 1024 ** 3          # default cap: a full-RAM memory dump still fits
+
+
+def download_dir(host):
+    """Default destination of download_file: $LABHAND_DOWNLOAD_DIR/<host>/, else
+    ~/labhand-downloads/<host>/ - outside any git checkout, since pulled files can be
+    malware samples or pcaps."""
+    base = os.environ.get("LABHAND_DOWNLOAD_DIR") or os.path.join("~", "labhand-downloads")
+    return os.path.join(os.path.abspath(os.path.expanduser(base)), host)
+
+
+def _git_checkout_of(path):
+    """The git work tree containing `path` (or the nearest existing parent), else None."""
+    cur = os.path.abspath(path)
+    while True:
+        if os.path.exists(os.path.join(cur, ".git")):
+            return cur
+        parent = os.path.dirname(cur)
+        if parent == cur:
+            return None
+        cur = parent
+
+
+def download_file(path, dest=None, host=None, overwrite=False, max_bytes=None, timeout=600):
+    """Copy a file from a lab host to the machine running labhand (the mirror of upload_file).
+
+    `path`: relative paths are inside the host's samples/ (as every tool reports them);
+    absolute paths (`/var/log/x`, `C:\\Windows\\x.dll`) are used as is. `dest`: a local file
+    path or an existing directory; default download_dir(host). The file is streamed over SFTP
+    in 1 MiB chunks straight to a temporary file next to the target and renamed into place
+    only when complete, so a multi-GB dump never sits in memory and a broken transfer
+    leaves nothing behind. An existing target is kept unless overwrite=True. A target inside
+    a git checkout is refused. The file is written without any execute bit; nothing here
+    ever runs it. `max_bytes` caps the size (default MAX_DOWNLOAD), `timeout` the whole
+    transfer in seconds. -> VMResult with size and sha256 in `known`; nothing interpreted."""
+    import secrets
+    import stat as _stat
+    h, err = hosts.check(host, "download_file")
+    if err:
+        return err
+    host = h.name
+    if not str(path or "").strip():
+        return VMResult(False, "download_file: `path` is empty")
+    cap = MAX_DOWNLOAD if max_bytes is None else int(max_bytes)
+    if cap < 0:
+        return VMResult(False, "download_file: max_bytes must be >= 0")
+    try:
+        timeout = int(timeout)
+    except (TypeError, ValueError):
+        return VMResult(False, "download_file: timeout must be a number of seconds")
+    rpath = remote.sftp_path(path, host)
+    base = re.split(r"[\\/]", rpath.rstrip("/\\"))[-1]
+    if not base or base in (".", ".."):
+        return VMResult(False, f"download_file: {path!r} does not name a file")
+
+    if dest:
+        target = os.path.abspath(os.path.expanduser(str(dest)))
+        if os.path.isdir(target) or str(dest).endswith(("/", "\\")):   # "dir/" = a folder
+            target = os.path.join(target, base)
+    else:
+        target = os.path.join(download_dir(host), base)
+    folder = os.path.dirname(target)
+    repo = _git_checkout_of(os.path.realpath(folder))     # a symlink into a repo counts
+    if repo:
+        return VMResult(False, f"download_file: {folder} is inside the git checkout {repo}; pulled "
+                               "files can be malware samples - pick a folder outside any repo "
+                               "(default: LABHAND_DOWNLOAD_DIR or ~/labhand-downloads/<host>/)")
+    if os.path.lexists(target) and not overwrite:
+        return VMResult(False, f"download_file: {target} already exists (pass overwrite=True "
+                               "to replace it)")
+    if os.path.isdir(target):
+        return VMResult(False, f"download_file: {target} is a directory")
+    try:
+        os.makedirs(folder, exist_ok=True)
+    except OSError as e:
+        return VMResult(False, f"download_file: cannot create {folder}: {e}")
+
+    def room(size):
+        free = shutil.disk_usage(folder).free
+        if size > free:
+            raise remote.DownloadError(f"{rpath} is {size} bytes but only {free} bytes are "
+                                       f"free in {folder}")
+
+    tmp = os.path.join(folder, f".{base}.{secrets.token_hex(4)}.part")
+    try:
+        # 0o600, no execute bit, and O_EXCL so two downloads never share a temp file
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), 0o600)
+        with os.fdopen(fd, "wb") as fh:
+            size, digest = remote.download_to(rpath, fh, host=host, max_bytes=cap,
+                                              timeout=timeout, on_size=room)
+        if overwrite:
+            os.replace(tmp, target)
+        else:
+            try:
+                os.link(tmp, target)       # atomic "create only if absent"
+                os.unlink(tmp)
+            except FileExistsError:
+                os.unlink(tmp)
+                return VMResult(False, f"download_file: {target} appeared while copying; kept it "
+                                       "(pass overwrite=True to replace it)")
+            except OSError:                # a filesystem without hard links
+                if os.path.lexists(target):
+                    os.unlink(tmp)
+                    return VMResult(False, f"download_file: {target} already exists")
+                os.replace(tmp, target)
+        os.chmod(target, _stat.S_IRUSR | _stat.S_IWUSR)
+    except remote.DownloadError as e:
+        _unlink_quiet(tmp)
+        return VMResult(False, f"download_file: {e}")
+    except FileNotFoundError:
+        _unlink_quiet(tmp)
+        return VMResult(False, f"download_file: {path} does not exist on {host} ({rpath})")
+    except TimeoutError:                 # socket.timeout: the channel went silent
+        _unlink_quiet(tmp)
+        return VMResult(False, f"download_file: the transfer from {host} stalled (no data for "
+                               f"{min(60, max(1, timeout))}s, read timeout); nothing was kept")
+    except Exception as e:  # noqa: BLE001 - raw failure back to the caller
+        _unlink_quiet(tmp)
+        return VMResult(False, f"download_file: copy from {host} failed: {e.__class__.__name__}: {e}")
+    return VMResult(True, f"downloaded {host}:{rpath} -> {target} ({size} bytes)",
+                    detail=f"sha256 {digest}\n{size} bytes\nlocal copy: {target} (mode 0600, "
+                           "never executed by labhand)",
+                    known=[f"{host}:{rpath} -> {target}", f"size {size} bytes", f"sha256 {digest}"])
+
+
+def _unlink_quiet(p):
+    try:
+        os.unlink(p)
+    except OSError:
+        pass
 
 
 def run_cmd(command, host=None, timeout=20):

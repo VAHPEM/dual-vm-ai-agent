@@ -63,8 +63,9 @@ below), never while a sample is in the VM.
    update `KALI_HOST` / `WIN_HOST` in `.env`.
 2. **Sharing → Clipboard Sharing: off.**
 3. **Sharing → Directory Sharing: none** (or at least read-only). Move files with
-   labhand's `upload_file` (and its mirror for pulling files back) instead: it goes over
-   SSH and only when the Mac asks.
+   labhand's `upload_file` / `download_file` instead: they go over SSH and only when the
+   Mac asks; a downloaded file lands outside any git checkout (`~/labhand-downloads/`),
+   mode 0600, and is never executed.
 4. **Input → USB Sharing:** keep off.
 5. **No port forwards** (none today; keep it so).
 

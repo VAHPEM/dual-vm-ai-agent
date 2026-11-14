@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """Thin SSH/SFTP layer to the lab hosts named in the inventory (labhand.hosts)."""
 import os
+import re
 import shlex
 import socket
 import paramiko
@@ -328,6 +329,92 @@ def read_bytes(remote_path, host=None):
         with sftp.file(remote_path, "rb") as f:
             return f.read()
     return _sftp_op(host, _op)
+
+
+class DownloadError(Exception):
+    """download_to() refused or failed; the message is meant for the caller. `dirty`: the
+    transfer was cut off with SFTP replies still in flight, so the connection is dropped."""
+    dirty = False
+
+
+def sftp_path(path, host=None):
+    """The SFTP path of a lab file: relative paths live under samples/ (where every tool
+    works), a path already rooted at samples/ or absolute is used as is. On a windows host a
+    drive path `C:\\x\\y` becomes `/C:/x/y`, the form Windows OpenSSH's SFTP server takes."""
+    p = str(path).strip()
+    if is_windows(host):
+        p = p.replace("\\", "/")
+        if re.match(r"^[A-Za-z]:/", p):
+            return "/" + p
+    if p.startswith("/") or p == "samples" or p.startswith("samples/"):
+        return p
+    return "samples/" + p
+
+
+def download_to(remote_path, local_fh, host=None, max_bytes=None, timeout=600,
+                window=8 << 20, req=32768, on_size=None):
+    """Stream a lab file into the open binary file `local_fh`, `window` bytes at a time in
+    `req`-byte SFTP requests: nothing larger than one window is ever held in memory.
+    Returns (size, sha256). Copies the size the file had when the transfer started.
+
+    Refuses a directory or a file over `max_bytes` (checked on the remote size before the
+    first byte). `timeout` bounds the whole
+    transfer (a stalled read is cut off by the channel timeout, at most 60 s). `on_size(n)`
+    is called with the remote size before the transfer starts (the caller checks disk space).
+    Raises DownloadError for a refusal, FileNotFoundError / PermissionError, socket.timeout /
+    paramiko errors for a broken transfer."""
+    import hashlib
+    import stat as _stat
+
+    deadline = _time.monotonic() + max(1, int(timeout))
+
+    def _op(sftp):
+        st = sftp.stat(remote_path)
+        if _stat.S_ISDIR(st.st_mode or 0):
+            raise DownloadError(f"{remote_path} is a directory, not a file")
+        size = int(st.st_size or 0)
+        if max_bytes is not None and size > max_bytes:
+            raise DownloadError(f"{remote_path} is {size} bytes, over the {max_bytes}-byte cap "
+                                "(pass a larger max_bytes if you really want it)")
+        if on_size:
+            on_size(size)
+        sftp.get_channel().settimeout(min(60, max(1, int(timeout))))
+        h, got = hashlib.sha256(), 0
+        with sftp.open(remote_path, "rb") as f:
+            # Pipelined reads, one bounded window at a time: readv() sends every request of
+            # the window at once and hands the replies back in order. MEASURED 2026-11-14 on
+            # Kali, 100 MiB: f.prefetch(size) held the whole file in memory (tracemalloc peak
+            # 100 MiB, 27 s); 8 MiB readv windows peak below 1 MiB and took 0.7 s.
+            off = 0
+            while off < size:
+                n = min(window, size - off)
+                for data in f.readv([(o, min(req, off + n - o)) for o in range(off, off + n, req)]):
+                    if _time.monotonic() > deadline:      # checked per 32 KiB reply
+                        e = DownloadError(f"timed out after {int(timeout)}s with {got} of {size} "
+                                          "bytes copied (pass a larger timeout for a big file)")
+                        e.dirty = True
+                        raise e
+                    got += len(data)
+                    h.update(data)
+                    local_fh.write(data)
+                off += n
+        if got != size:
+            raise DownloadError(f"{remote_path} changed while it was copied ({got} of {size} bytes)")
+        return got, h.hexdigest()
+
+    try:
+        return _sftp_op(host, _op)
+    except DownloadError as e:
+        if e.dirty:
+            _drop(host)
+        raise
+    except (FileNotFoundError, PermissionError):
+        raise                    # a missing / unreadable file: the connection is fine
+    except BaseException:        # incl. socket.timeout (an OSError, so it must come after)
+        # A transfer cut off half-way leaves read-ahead replies in flight on this
+        # connection: drop it so the next call starts on a clean one.
+        _drop(host)
+        raise
 
 
 # --- A REAL timeout on Windows ----------------------------------------------------

@@ -107,8 +107,9 @@ task-specific bit.
 
 | Area | Tools |
 |---|---|
-| Run & read output | `shell.run_cmd`, `shell.run_script`, `shell.read_file` (paged; auto-serves from the other VM) |
+| Run & read output | `shell.run_cmd`, `shell.run_script`, `shell.read_file` (paged; serves the file from another host when it is not on the one asked) |
 | Move files in | `shell.upload_file` (a local file into a VM's `samples/`, sub-dirs kept) |
+| Move files out | `shell.download_file` (a VM file to this machine, streamed, never into a git checkout, size + sha256 reported) |
 | Windows: read screen | `windows.win_windows` (titles + UI-Automation tree + inner text) |
 | Windows: see screen | `windows.win_screenshot` |
 | Windows: run GUI | `windows.win_gui_run` |
@@ -159,7 +160,7 @@ ask before the actors:
 |---|---|---|
 | Observe | `read_file`, `win_windows`, `win_screenshot`, `win_ui_tree` | read-only, idempotent, closed-world |
 | Act | `run_cmd`, `run_script`, `job_start`, `win_gui_run`, `win_frida`, `win_ui_click`, `win_ui_type`, `win_key`, `win_ui_seq`, `linux_gui_run`, `linux_gdb` | destructive, open-world |
-| Act (bounded) | `job_poll` (can `stop` a job), `upload_file` (replaces a file in `samples/`) | destructive, idempotent, closed-world |
+| Act (bounded) | `job_poll` (can `stop` a job), `upload_file` (replaces a file in `samples/`), `download_file` (writes a local file; `overwrite` can replace one) | destructive, idempotent, closed-world |
 
 The hints are UI guidance for the client, not a security boundary. `labhand.safety`
 refuses only three disk-wrecking commands (recursive delete of `/`, `mkfs` / `diskpart`,
