@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
-"""dualvm.jobs on Windows, without a VM: what job_start sends, and the launcher's behaviour.
+"""labhand.jobs on Windows, without a VM: what job_start sends, and the launcher's behaviour.
 
 The VM measurements these guard (2026-11-10, Windows 11 ARM64): a Start-Process child of the
 SSH session died ~1 s after job_start returned, and the one-line `& echo __JOB_RC=%errorlevel%`
-logged `cmd /c exit 3` as 0. See the comment above _WIN_JOB_LAUNCHER in dualvm/jobs.py.
+logged `cmd /c exit 3` as 0. See the comment above _WIN_JOB_LAUNCHER in labhand/jobs.py.
 """
 import os
 import subprocess
@@ -11,7 +11,7 @@ import sys
 
 import pytest
 
-from dualvm import jobs, remote
+from labhand import hosts, jobs, remote
 
 
 @pytest.fixture
@@ -30,9 +30,11 @@ def fake_windows(monkeypatch):
 
     monkeypatch.setattr(remote, "write_remote", write_remote)
     monkeypatch.setattr(remote, "ssh_exec", ssh_exec)
-    monkeypatch.setattr(remote, "win_samples", lambda: r"C:\Users\o'neil\samples")
-    monkeypatch.setattr(remote, "WIN_PYTHON_EXE", r"C:\Py\python.exe")
-    return sent
+    monkeypatch.setattr(remote, "win_samples", lambda host=None: r"C:\Users\o'neil\samples")
+    hosts.reload({"KALI_HOST": "k", "KALI_USER": "t", "WIN_HOST": "w", "WIN_USER": "t",
+                  "WIN_PYTHON_EXE": r"C:\Py\python.exe"})
+    yield sent
+    hosts.reload()
 
 
 def test_windows_job_is_created_through_wmi(fake_windows):

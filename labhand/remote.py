@@ -1,26 +1,64 @@
 # -*- coding: utf-8 -*-
-"""Thin SSH/SFTP layer to the Kali and Windows VMs (self-contained, so the
-agent package does not import the old LangGraph pipeline)."""
+"""Thin SSH/SFTP layer to the lab hosts named in the inventory (labhand.hosts)."""
 import os
+import re
 import shlex
 import socket
 import paramiko
-from dotenv import load_dotenv
+
+from . import hosts
+from .hosts import workdir as _wd, workdir_win as _wdw  # noqa: F401
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-load_dotenv(os.environ.get("DUALVM_ENV", os.path.join(_HERE, "..", ".env")))
+_env_path = hosts.env_path          # the .env itself is loaded by labhand.hosts
 
-KALI_HOST = os.environ["KALI_HOST"]
-KALI_USER = os.environ["KALI_USER"]
-WIN_HOST = os.environ.get("WIN_HOST", "")
-WIN_USER = os.environ.get("WIN_USER", "")
-WIN_PYTHON_EXE = os.environ.get(
-    "WIN_PYTHON_EXE",
-    r"C:\Users\vahpem\AppData\Local\Programs\Python\Python314\python.exe",
-)
-KALI_PYTHON = os.environ.get("KALI_PYTHON", "/home/vahpem/analysis-venv/bin/python3")
-SSH_KEY_PATH = os.environ.get("DUALVM_SSH_KEY", os.path.join(
-    _HERE, "..", ".ssh_keys", "dualvm_ed25519"))
+
+def _default_key(keys=os.path.join(_HERE, "..", ".ssh_keys")):
+    """.ssh_keys/labhand_ed25519 if present, else the one private key in .ssh_keys/ (a
+    checkout from before the rename keeps its old key file name), else labhand_ed25519."""
+    preferred = os.path.join(keys, "labhand_ed25519")
+    if os.path.exists(preferred):
+        return preferred
+    try:
+        found = sorted(f for f in os.listdir(keys)
+                       if not f.endswith(".pub") and not f.startswith(".")
+                       and os.path.isfile(os.path.join(keys, f)))
+    except OSError:
+        found = []
+    return os.path.join(keys, found[0]) if len(found) == 1 else preferred
+
+
+SSH_KEY_PATH = _env_path("LABHAND_SSH_KEY", "DUALVM_SSH_KEY", _default_key())
+
+
+def _first(os_name):
+    try:
+        return next((h for h in hosts.inventory().values() if h.os == os_name), None)
+    except hosts.HostError:
+        return None
+
+
+# Pre-inventory module constants, kept for callers that read them (e.g. rust-deobf's lab
+# matrix reads KALI_PYTHON / WIN_PYTHON_EXE): the first linux / windows host of the inventory.
+_L, _W = _first("linux"), _first("windows")
+KALI_HOST, KALI_USER = (_L.address, _L.user) if _L else ("", "")
+WIN_HOST, WIN_USER = (_W.address, _W.user) if _W else ("", "")
+KALI_PYTHON = _L.python if _L else hosts.LEGACY_KALI_PYTHON
+WIN_PYTHON_EXE = _W.python if _W else hosts.LEGACY_WIN_PYTHON
+
+
+def host_os(host):
+    """'linux' or 'windows' for an inventory host; raises hosts.HostError if unknown."""
+    return hosts.get(host).os
+
+
+def is_windows(host):
+    return hosts.get(host).is_windows
+
+
+def python_for(host):
+    """The interpreter run_script / job scripts use on `host` (<NAME>_PYTHON)."""
+    return hosts.get(host).python
 
 
 def _client(host, user, attempts=3):
@@ -49,14 +87,18 @@ def _client(host, user, attempts=3):
     raise last
 
 
-def get_kali():
-    return _client(KALI_HOST, KALI_USER)
+def get_client(host):
+    """A fresh SSH client to inventory host `host` (raises hosts.HostError if unknown)."""
+    h = hosts.get(host)
+    return _client(h.address, h.user)
 
 
-def get_windows():
-    if not WIN_HOST:
-        raise RuntimeError("WIN_HOST not configured")
-    return _client(WIN_HOST, WIN_USER)
+def get_kali():          # pre-inventory helper: the first linux host
+    return get_client(hosts.default("linux"))
+
+
+def get_windows():       # pre-inventory helper: the first windows host
+    return get_client(hosts.default("windows"))
 
 
 # --- ONE pooled SSH connection per host -------------------------------------------
@@ -73,8 +115,13 @@ import time as _time
 _POOL = {}
 
 
+def _key(host):
+    """The pool key: the inventory name (None -> the default host). Unknown -> HostError."""
+    return hosts.get(host).name
+
+
 def _drop(host):
-    c = _POOL.pop(host, None)
+    c = _POOL.pop(_key(host), None)
     if c is not None:
         try:
             c.close()
@@ -83,13 +130,14 @@ def _drop(host):
 
 
 def _get(host):
+    host = _key(host)
     c = _POOL.get(host)
     if c is not None:
         t = c.get_transport()
         if t is not None and t.is_active():
             return c
         _drop(host)
-    c = get_windows() if host == "windows" else get_kali()
+    c = get_client(host)
     try:
         c.get_transport().set_keepalive(30)   # survives a long Brain call in between
     except Exception:  # noqa: BLE001
@@ -131,7 +179,7 @@ def _sftp_op(host, fn):
                 pass
 
 
-def ssh_exec(cmd, host="kali", read_timeout=None):
+def ssh_exec(cmd, host=None, read_timeout=None):
     """Run a shell command, return combined (stdout, stderr). read_timeout guards
     against a stalled channel (the Windows path has no shell `timeout`)."""
     for attempt in (1, 2):
@@ -200,11 +248,13 @@ def _ensure_self_symlink(sftp, host):
     it (no infinite loop, GNU find does not follow symlinks by default), and
     bare filenames (no prefix) are unaffected. Windows is scoped out for now -
     no instance of this failure has been observed there, and directory
-    junctions need different handling (elevated rights, different semantics)."""
-    if host != "kali":
+    junctions need different handling (elevated rights, different semantics).
+    Applies to every linux host of the inventory."""
+    if is_windows(host):
         return
     try:
-        sftp.symlink(".", "samples/samples")
+        wd = _wd()
+        sftp.symlink(".", f"{wd}/{wd.rsplit('/', 1)[-1]}")
     except IOError:
         pass
 
@@ -223,22 +273,16 @@ def _sftp_makedirs(sftp, dirpath):
             pass          # already exists (or a race) - the put() below is the real check
 
 
-def upload(local_path, filename, host="kali"):
-    """Put a local file into the remote samples/ dir (subdir layout preserved: a
-    `filename` like 'data/x.bin' lands at samples/data/x.bin); return its remote path."""
-    remote = f"samples/{filename}"
+def upload(local_path, filename, host=None):
+    """Put a local file into the remote working dir (workdir(), default samples/; subdir
+    layout preserved: 'data/x.bin' lands at samples/data/x.bin); return its remote path."""
+    remote = f"{_wd()}/{filename}"
 
     def _op(sftp):
-        try:
-            sftp.mkdir("samples")
-        except IOError:
-            pass
-        parent = remote.rsplit("/", 1)[0]
-        if parent != "samples":                 # nested: make samples/data/gfx/...
-            _sftp_makedirs(sftp, parent)
+        _sftp_makedirs(sftp, remote.rsplit("/", 1)[0])   # workdir (and samples/data/gfx/...)
         _ensure_self_symlink(sftp, host)
         sftp.put(local_path, remote)
-    if host == "windows":
+    if is_windows(host):
         # A leftover process from an earlier run LOCKS its own .exe image and the DLLs
         # it loaded, so the SFTP put fails with OSError "Failure" (measured ch8 run 8:
         # the .exe upload failed while its DLLs went up fine). Kill any process with
@@ -254,7 +298,7 @@ def upload(local_path, filename, host="kali"):
                 _last = _e
                 if _base.lower().endswith(".exe"):
                     try:
-                        ssh_exec(f'taskkill /F /T /IM "{_base}"', host="windows", read_timeout=15)
+                        ssh_exec(f'taskkill /F /T /IM "{_base}"', host=host, read_timeout=15)
                     except Exception:  # noqa: BLE001 - nothing to kill is fine
                         pass
                 _time.sleep(0.6 * (_attempt + 1))
@@ -263,24 +307,107 @@ def upload(local_path, filename, host="kali"):
     return remote
 
 
-def write_remote(remote_path, content, host="kali"):
+def write_remote(remote_path, content, host=None):
     def _op(sftp):
-        try:
-            sftp.mkdir("samples")
-        except IOError:
-            pass
+        _sftp_makedirs(sftp, _wd())             # the working dir (nested if configured)
         _ensure_self_symlink(sftp, host)
         with sftp.file(remote_path, "w") as f:
             f.write(content)
     _sftp_op(host, _op)
 
 
-def read_bytes(remote_path, host="kali"):
+def read_bytes(remote_path, host=None):
     """Read a whole remote file over SFTP (no shell => no cmd.exe/bash quoting issues)."""
     def _op(sftp):
         with sftp.file(remote_path, "rb") as f:
             return f.read()
     return _sftp_op(host, _op)
+
+
+class DownloadError(Exception):
+    """download_to() refused or failed; the message is meant for the caller. `dirty`: the
+    transfer was cut off with SFTP replies still in flight, so the connection is dropped."""
+    dirty = False
+
+
+def sftp_path(path, host=None):
+    """The SFTP path of a lab file: relative paths live under samples/ (where every tool
+    works), a path already rooted at samples/ or absolute is used as is. On a windows host a
+    drive path `C:\\x\\y` becomes `/C:/x/y`, the form Windows OpenSSH's SFTP server takes."""
+    p = str(path).strip()
+    if is_windows(host):
+        p = p.replace("\\", "/")
+        if re.match(r"^[A-Za-z]:/", p):
+            return "/" + p
+    if p.startswith("/") or p == _wd() or p.startswith(f"{_wd()}/"):
+        return p
+    return f"{_wd()}/" + p
+
+
+def download_to(remote_path, local_fh, host=None, max_bytes=None, timeout=600,
+                window=8 << 20, req=32768, on_size=None):
+    """Stream a lab file into the open binary file `local_fh`, `window` bytes at a time in
+    `req`-byte SFTP requests: nothing larger than one window is ever held in memory.
+    Returns (size, sha256). Copies the size the file had when the transfer started.
+
+    Refuses a directory or a file over `max_bytes` (checked on the remote size before the
+    first byte). `timeout` bounds the whole
+    transfer (a stalled read is cut off by the channel timeout, at most 60 s). `on_size(n)`
+    is called with the remote size before the transfer starts (the caller checks disk space).
+    Raises DownloadError for a refusal, FileNotFoundError / PermissionError, socket.timeout /
+    paramiko errors for a broken transfer."""
+    import hashlib
+    import stat as _stat
+
+    deadline = _time.monotonic() + max(1, int(timeout))
+
+    def _op(sftp):
+        st = sftp.stat(remote_path)
+        if _stat.S_ISDIR(st.st_mode or 0):
+            raise DownloadError(f"{remote_path} is a directory, not a file")
+        size = int(st.st_size or 0)
+        if max_bytes is not None and size > max_bytes:
+            raise DownloadError(f"{remote_path} is {size} bytes, over the {max_bytes}-byte cap "
+                                "(pass a larger max_bytes if you really want it)")
+        if on_size:
+            on_size(size)
+        sftp.get_channel().settimeout(min(60, max(1, int(timeout))))
+        h, got = hashlib.sha256(), 0
+        with sftp.open(remote_path, "rb") as f:
+            # Pipelined reads, one bounded window at a time: readv() sends every request of
+            # the window at once and hands the replies back in order. MEASURED 2026-11-14 on
+            # Kali, 100 MiB: f.prefetch(size) held the whole file in memory (tracemalloc peak
+            # 100 MiB, 27 s); 8 MiB readv windows peak below 1 MiB and took 0.7 s.
+            off = 0
+            while off < size:
+                n = min(window, size - off)
+                for data in f.readv([(o, min(req, off + n - o)) for o in range(off, off + n, req)]):
+                    if _time.monotonic() > deadline:      # checked per 32 KiB reply
+                        e = DownloadError(f"timed out after {int(timeout)}s with {got} of {size} "
+                                          "bytes copied (pass a larger timeout for a big file)")
+                        e.dirty = True
+                        raise e
+                    got += len(data)
+                    h.update(data)
+                    local_fh.write(data)
+                off += n
+        if got != size:
+            raise DownloadError(f"{remote_path} changed while it was copied ({got} of {size} bytes)")
+        return got, h.hexdigest()
+
+    try:
+        return _sftp_op(host, _op)
+    except DownloadError as e:
+        if e.dirty:
+            _drop(host)
+        raise
+    except (FileNotFoundError, PermissionError):
+        raise                    # a missing / unreadable file: the connection is fine
+    except BaseException:        # incl. socket.timeout (an OSError, so it must come after)
+        # A transfer cut off half-way leaves read-ahead replies in flight on this
+        # connection: drop it so the next call starts on a clean one.
+        _drop(host)
+        raise
 
 
 # --- A REAL timeout on Windows ----------------------------------------------------
@@ -320,36 +447,38 @@ print("__RC=%d" % (rc & 0xFFFFFFFF))
 """
 
 
-def win_run_bounded(command, timeout):
-    """Run a cmd.exe command line in samples/ on Windows with a REAL, tree-killing
-    timeout. Returns (stdout, stderr); stdout ends with __RC=<n> (124 = timed out)."""
-    write_remote("samples/_win_cmd.txt", command, host="windows")
-    write_remote("samples/_timeout_run.py", _WIN_LAUNCHER, host="windows")
-    launcher = win_samples() + "\\_timeout_run.py"
-    return ssh_exec(f'"{WIN_PYTHON_EXE}" "{launcher}" {int(timeout)}',
-                    host="windows", read_timeout=int(timeout) + 25)
+def win_run_bounded(command, timeout, host=None):
+    """Run a cmd.exe command line in samples/ on a Windows host (default: the first one)
+    with a REAL, tree-killing timeout. Returns (stdout, stderr); stdout ends with
+    __RC=<n> (124 = timed out)."""
+    host = hosts.get(host, "windows").name
+    write_remote(f"{_wd()}/_win_cmd.txt", command, host=host)
+    write_remote(f"{_wd()}/_timeout_run.py", _WIN_LAUNCHER, host=host)
+    launcher = win_samples(host) + "\\_timeout_run.py"
+    return ssh_exec(f'"{python_for(host)}" "{launcher}" {int(timeout)}',
+                    host=host, read_timeout=int(timeout) + 25)
 
 
-def run_script(script, host="kali", timeout=20, python=None):
+def run_script(script, host=None, timeout=20, python=None):
     """Write exploit.py to samples/ and run it under the right interpreter,
     bounded by a REAL timeout on both hosts. `python` overrides the interpreter
     (absolute path) - needed when a challenge's payload is version-locked to an
-    interpreter other than KALI_PYTHON (e.g. a CPython the Brain installed with
+    interpreter other than the host's <NAME>_PYTHON (e.g. a CPython the Brain installed with
     `uv python install 3.12`). Returns combined output."""
-    write_remote("samples/exploit.py", script, host=host)
-    if host == "windows":
-        exe = python or WIN_PYTHON_EXE
+    write_remote(f"{_wd()}/exploit.py", script, host=host)
+    if is_windows(host):
+        exe = python or python_for(host)
         # real timeout + real exit code (was: read_timeout only, rc squashed to 0/1)
-        o, e = win_run_bounded(f'"{exe}" exploit.py', timeout)
+        o, e = win_run_bounded(f'"{exe}" exploit.py', timeout, host=host)
     else:
-        exe = python or KALI_PYTHON
+        exe = python or python_for(host)
         # `timeout -k 5` runs the child in its OWN process group and signals the
         # whole group, so a solver that forks does not leave orphans behind
         # (measured 2026-09-22: without it, a killed SSH channel left the remote
         # command running to completion on the VM).
-        cmd = (f"cd samples && timeout -k 5 {int(timeout)} {shlex.quote(exe)} "
+        cmd = (f"cd {_wd()} && timeout -k 5 {int(timeout)} {shlex.quote(exe)} "
                f"exploit.py 2>&1; echo __RC=$?")
-        o, e = ssh_exec(cmd, host="kali", read_timeout=timeout + 25)
+        o, e = ssh_exec(cmd, host=host, read_timeout=timeout + 25)
     return (o + "\n" + e).strip()
 
 
@@ -366,21 +495,22 @@ def run_script(script, host="kali", timeout=20, python=None):
 # The way across is a scheduled task created with /it (interactive): it runs as the
 # logged-on user IN session 1. Verified end to end - a 556KB screenshot of the real
 # desktop came back this way.
-_WIN_HOME = None
+_WIN_HOME = {}
 
 
-def win_home():
-    """Absolute path of the Windows user's profile dir (cached)."""
-    global _WIN_HOME
-    if _WIN_HOME is None:
-        o, _ = ssh_exec("echo %USERPROFILE%", host="windows", read_timeout=25)
+def win_home(host=None):
+    """Absolute path of the Windows user's profile dir on `host` (default: the first
+    windows host); cached per host."""
+    h = hosts.get(host, "windows")
+    if h.name not in _WIN_HOME:
+        o, _ = ssh_exec("echo %USERPROFILE%", host=h.name, read_timeout=25)
         lines = [l.strip() for l in (o or "").splitlines() if ":\\" in l]
-        _WIN_HOME = lines[-1] if lines else "C:\\Users\\" + WIN_USER
-    return _WIN_HOME
+        _WIN_HOME[h.name] = lines[-1] if lines else "C:\\Users\\" + h.user
+    return _WIN_HOME[h.name]
 
 
-def win_samples():
-    return win_home() + "\\samples"
+def win_samples(host=None):
+    return win_home(host) + "\\" + _wdw()
 
 
 _GUI_DRIVER = """
@@ -410,22 +540,24 @@ $out | Out-File -FilePath "$S\\_gui_out.txt" -Encoding utf8
 """
 
 
-def run_in_session1(ps_body, timeout=60, task="dualvm_gui"):
+def run_in_session1(ps_body, timeout=60, task="labhand_gui", host=None):
     """Run a PowerShell body on the Windows INTERACTIVE desktop; return (text, timed_out).
 
     The body may use $S for the samples dir; whatever it Write-Output's comes back.
+    `host`: a windows host of the inventory (default: the first one).
     """
-    samples = win_samples()
+    host = hosts.get(host, "windows").name
+    samples = win_samples(host)
     ssh_exec('if not exist "' + samples + '" mkdir "' + samples + '"',
-             host="windows", read_timeout=25)
-    write_remote("samples/_gui_task.ps1",
-                 _GUI_TASK_WRAPPER.format(samples=samples, body=ps_body), host="windows")
-    write_remote("samples/_gui_driver.ps1",
+             host=host, read_timeout=25)
+    write_remote(f"{_wd()}/_gui_task.ps1",
+                 _GUI_TASK_WRAPPER.format(samples=samples, body=ps_body), host=host)
+    write_remote(f"{_wd()}/_gui_driver.ps1",
                  _GUI_DRIVER.format(samples=samples, task=task, timeout=int(timeout)),
-                 host="windows")
+                 host=host)
     o, e = ssh_exec(
         'powershell -NoProfile -ExecutionPolicy Bypass -File "' + samples + '\\_gui_driver.ps1"',
-        host="windows", read_timeout=int(timeout) + 45)
+        host=host, read_timeout=int(timeout) + 45)
     text = ((o or "") + (e or "")).strip()
     timed_out = "__GUI_TIMEOUT__" in text
     text = text.replace("__GUI_TIMEOUT__", "").replace("__GUI_END__", "").strip()

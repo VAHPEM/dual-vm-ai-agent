@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-"""dualvm.jobs — split from the original monorepo (verbatim).
-Xem TODO[coupling] cho cac cho can truyen tham so thay cho ws/reasoner."""
+"""labhand.jobs — background jobs on a lab host (start, poll, tail, stop)."""
 import re, ast, shlex
-from . import remote
+from . import remote, hosts
+from .hosts import workdir as _wd, workdir_win as _wdw  # noqa: F401
 from ._result import VMResult, _spill, _find_match  # noqa
 from .safety import _security_block
 
@@ -68,7 +68,11 @@ def _win_job_alive_ps(nm):
             f'    $alive = [bool]($pr -and $pr.CommandLine -and $pr.CommandLine.Contains({_ps_quote(marker)})) }}')
 
 
-def job_start(name, command=None, script=None, host="kali", python=None, truncated=False):
+def job_start(name, command=None, script=None, host=None, python=None, truncated=False):
+    h, err = hosts.check(host, "job_start")
+    if err:
+        return err
+    host = h.name
     nm = str(name or "").strip()
     if not _JOB_NAME_RE.match(nm):
         return VMResult(False, "job_start: `name` must be 1-40 chars of letters, "
@@ -93,16 +97,16 @@ def job_start(name, command=None, script=None, host="kali", python=None, truncat
             return VMResult(False, f"job_start: that script does not parse "
                                      f"(line {e.lineno}: {e.msg}) - fix it first")
         try:
-            remote.write_remote(f"samples/{pyf}", script, host=host)
+            remote.write_remote(f"{_wd()}/{pyf}", script, host=host)
         except Exception as e:  # noqa: BLE001
             return VMResult(False, f"job_start: could not upload the script: {e}")
 
-    if host == "windows":
-        interp = python or remote.WIN_PYTHON_EXE
+    if h.is_windows:
+        interp = python or h.python
         inner = (f'"{interp}" -u {pyf}' if script else command)
-        samples = remote.win_samples()
+        samples = remote.win_samples(host)
         launch = f"_job_{nm}_launch.py"          # per job: two starts never share a file
-        cmdline = f'"{remote.WIN_PYTHON_EXE}" -u "{samples}\\{launch}" {nm}'
+        cmdline = f'"{h.python}" -u "{samples}\\{launch}" {nm}'
         ps = (f'$ErrorActionPreference="Continue"\n'
               f'Set-Location "{samples}"\n'
               f'Remove-Item -Force -ErrorAction SilentlyContinue "{log}","{pidf}"\n'
@@ -112,21 +116,21 @@ def job_start(name, command=None, script=None, host="kali", python=None, truncat
               f'else {{ $r.ProcessId | Out-File -Encoding ascii "{pidf}"\n'
               f'       Write-Output ("JOB_PID=" + $r.ProcessId) }}\n')
         try:
-            remote.write_remote(f"samples/_job_{nm}_cmd.txt", inner, host="windows")
-            remote.write_remote(f"samples/{launch}", _WIN_JOB_LAUNCHER, host="windows")
-            remote.write_remote(f"samples/_job_{nm}_start.ps1", ps, host="windows")
+            remote.write_remote(f"{_wd()}/_job_{nm}_cmd.txt", inner, host=host)
+            remote.write_remote(f"{_wd()}/{launch}", _WIN_JOB_LAUNCHER, host=host)
+            remote.write_remote(f"{_wd()}/_job_{nm}_start.ps1", ps, host=host)
             o, e = remote.ssh_exec(
                 f'powershell -NoProfile -ExecutionPolicy Bypass -File '
-                f'"{remote.win_samples()}\\_job_{nm}_start.ps1"',
-                host="windows", read_timeout=40)
+                f'"{samples}\\_job_{nm}_start.ps1"',
+                host=host, read_timeout=40)
             out = ((o or "") + (e or "")).strip()
         except Exception as e:  # noqa: BLE001
             return VMResult(False, f"job_start failed: {e.__class__.__name__}: {e}")
     else:
-        interp = python or remote.KALI_PYTHON
+        interp = python or h.python
         inner = (f"{shlex.quote(interp)} -u {pyf}" if script else command)
         wrapped = f"{inner}\n__rc=$?\necho __JOB_RC=$__rc"
-        sh = ("cd samples 2>/dev/null || exit 9\n"
+        sh = (f"mkdir -p {_wd()} 2>/dev/null; cd {_wd()} 2>/dev/null || exit 9\n"
               f"rm -f {log} {pidf}\n"
               f"setsid nohup bash -c {shlex.quote(wrapped)} > {log} 2>&1 < /dev/null &\n"
               f"echo $! > {pidf}\n"
@@ -147,16 +151,20 @@ def job_start(name, command=None, script=None, host="kali", python=None, truncat
     return VMResult(True, f"job '{nm}' started on {host} (pid {pid}) - it keeps "
                             f"running after this call; check it with job_poll(name='{nm}')",
                       detail=out[:600],
-                      known=[f"job '{nm}' running on {host}, pid {pid}, log samples/{log}"])
+                      known=[f"job '{nm}' running on {host}, pid {pid}, log {_wd()}/{log}"])
 
 
-def job_poll(name=None, tail=40, grep=None, stop=False, host="kali"):
+def job_poll(name=None, tail=40, grep=None, stop=False, host=None):
+    h, err = hosts.check(host, "job_poll")
+    if err:
+        return err
+    host = h.name
     if name is None:
-        cmd = ("cd samples 2>/dev/null && ls -la _job_*.log 2>/dev/null | head -40 "
-               "|| echo 'no jobs'") if host != "windows" else \
-              f'dir /b "{remote.win_samples()}\\_job_*.log"'
         try:
-            o, e = remote.ssh_exec(cmd if host == "windows" else f"bash -c {shlex.quote(cmd)}",
+            cmd = (f'dir /b "{remote.win_samples(host)}\\_job_*.log"' if h.is_windows else
+                   f"cd {_wd()} 2>/dev/null && ls -la _job_*.log 2>/dev/null | head -40 "
+                   "|| echo 'no jobs'")
+            o, e = remote.ssh_exec(cmd if h.is_windows else f"bash -c {shlex.quote(cmd)}",
                                    host=host, read_timeout=30)
         except Exception as ex:  # noqa: BLE001
             return VMResult(False, f"job_poll failed: {ex.__class__.__name__}: {ex}")
@@ -169,10 +177,10 @@ def job_poll(name=None, tail=40, grep=None, stop=False, host="kali"):
     log, pidf, _ = _job_paths(nm)
     n = max(1, int(tail))
 
-    if host == "windows":
+    if h.is_windows:
         # NO_SUCH_JOB keys on the pid file: the launcher creates the log only once it runs,
         # so a job polled in its first instant has a pid file but no log yet
-        ps = [f'Set-Location "{remote.win_samples()}"',
+        ps = [f'Set-Location "{remote.win_samples(host)}"',
               f'if (-not (Test-Path "{pidf}") -and -not (Test-Path "{log}")) {{ Write-Output "NO_SUCH_JOB" }} else {{',
               _win_job_alive_ps(nm)]
         if stop:
@@ -197,16 +205,16 @@ def job_poll(name=None, tail=40, grep=None, stop=False, host="kali"):
         ps.append('}')
         body = "\n".join(ps)
         try:
-            remote.write_remote(f"samples/_job_{nm}_poll.ps1", body, host="windows")
+            remote.write_remote(f"{_wd()}/_job_{nm}_poll.ps1", body, host=host)
             o, e = remote.ssh_exec(
                 f'powershell -NoProfile -ExecutionPolicy Bypass -File '
-                f'"{remote.win_samples()}\\_job_{nm}_poll.ps1"',
-                host="windows", read_timeout=45)
+                f'"{remote.win_samples(host)}\\_job_{nm}_poll.ps1"',
+                host=host, read_timeout=45)
             txt = ((o or "") + (e or "")).strip()
         except Exception as ex:  # noqa: BLE001
             return VMResult(False, f"job_poll failed: {ex.__class__.__name__}: {ex}")
     else:
-        parts = ["cd samples 2>/dev/null || exit 9",
+        parts = [f"cd {_wd()} 2>/dev/null || exit 9",
                  f'[ -f {log} ] || {{ echo NO_SUCH_JOB; exit 0; }}',
                  f'pid=$(cat {pidf} 2>/dev/null)']
         if stop:
@@ -244,8 +252,8 @@ def job_poll(name=None, tail=40, grep=None, stop=False, host="kali"):
     if rc:
         head += f", exit code {rc.group(1)}"
     if size:
-        head += f", log {size.group(1)} bytes (samples/{log} - page it with read_file)"
+        head += f", log {size.group(1)} bytes ({_wd()}/{log} - page it with read_file)"
     detail, _ = _spill(host, txt, f"job_{nm}")
     return VMResult(True, head, detail=detail, info=detail,
                       known=[f"job '{nm}' {state}" + (f" rc={rc.group(1)}" if rc else "")],
-                      flag=_find_match(txt), waiting=(state == "RUNNING"))
+                      match=_find_match(txt), waiting=(state == "RUNNING"))

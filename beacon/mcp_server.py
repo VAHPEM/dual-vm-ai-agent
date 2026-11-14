@@ -5,7 +5,7 @@ Run (Claude Code starts it from .mcp.json; it inherits BEACON_RUN):
     python3 -m beacon.mcp_server            # stdio transport
 
 Needs the `mcp` package (>= 1.7; 1.x FastMCP and 2.x MCPServer both work), the
-same requirement as dualvm.mcp_server. Every tool returns text; a rule
+same requirement as labhand.mcp_server. Every tool returns text; a rule
 violation comes back as "REFUSED: <the rule>".
 """
 try:  # mcp 1.x
@@ -112,8 +112,8 @@ def propose_problem(title: str, rationale: str, evidence_ids: list[int] | None =
 
 @mcp.tool(annotations=_write("Mark waiting"))
 def mark_waiting(node_id: str, job: str, host: str = "kali", max_minutes: int = 30) -> str:
-    """Register a running background job (dualvm.jobs) so time spent waiting for it is not counted as
-    idle. Poll it with dualvm.jobs.job_poll and attach its output as evidence."""
+    """Register a running background job (labhand.jobs) so time spent waiting for it is not counted as
+    idle. Poll it with labhand.jobs.job_poll and attach its output as evidence."""
     return tools.mark_waiting(node_id, job, host=host, max_minutes=max_minutes)
 
 

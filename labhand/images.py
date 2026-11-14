@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-"""dualvm.images — split from the original monorepo (verbatim).
-Xem TODO[coupling] cho cac cho can truyen tham so thay cho ws/reasoner."""
+"""labhand.images — read pictures (screenshots, rendered pages) back from a lab host."""
 import os, base64, re
-from . import remote
+from . import remote, hosts
+from .hosts import workdir as _wd, workdir_win as _wdw  # noqa: F401
 
 
 # --- Seeing things: images, PDFs, and real GUIs -----------------------------------
@@ -51,12 +51,13 @@ def _prepare_image(raw, ext):
     # no Pillow on the host: ImageMagick on Kali can still convert
     if ext in _CONVERTIBLE:
         try:
-            remote.write_remote("samples/_viewconv_in", raw, host="kali")
-            remote.ssh_exec("cd samples && convert _viewconv_in -resize "
+            lin = hosts.default("linux")        # ImageMagick lives on a linux host
+            remote.write_remote(f"{_wd()}/_viewconv_in", raw, host=lin)
+            remote.ssh_exec(f"cd {_wd()} && convert _viewconv_in -resize "
                             f"{IMAGE_MAX_EDGE}x{IMAGE_MAX_EDGE}\\> _viewconv_out.png",
-                            host="kali", read_timeout=40)
-            png = remote.read_bytes("samples/_viewconv_out.png", host="kali")
-            return "image/png", base64.b64encode(png).decode(), " (converted on Kali)"
+                            host=lin, read_timeout=40)
+            png = remote.read_bytes(f"{_wd()}/_viewconv_out.png", host=lin)
+            return "image/png", base64.b64encode(png).decode(), f" (converted on {lin})"
         except Exception as e:  # noqa: BLE001
             return None, None, f"format .{ext} needs conversion and it failed ({e})"
     if ext in _VIEWABLE:

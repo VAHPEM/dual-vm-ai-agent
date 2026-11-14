@@ -32,3 +32,7 @@ def test_doctor_catches_missing_and_double_hooks(tmp_path):
     empty.mkdir()
     rep = doctor(project=str(empty))
     assert "hook Stop is not installed" in rep.text()
+
+
+def test_doctor_reports_labhand_importable():
+    assert "[OK]   labhand importable" in doctor().text()

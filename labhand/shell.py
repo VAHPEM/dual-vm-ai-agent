@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-"""dualvm.shell — split from the original monorepo (verbatim).
-Xem TODO[coupling] cho cac cho can truyen tham so thay cho ws/reasoner."""
-import os, re, shlex, base64
-from . import remote, config
+"""labhand.shell — run commands and scripts on a lab host, page files, upload files."""
+import os, re, shlex, base64, shutil
+from . import remote, config, hosts
+from .hosts import workdir as _wd, workdir_win as _wdw  # noqa: F401
 from ._result import VMResult, SLICE, _spill, _save_to_host, _find_match  # noqa
 from .output import _clamp_page
 from .safety import _security_block
@@ -17,10 +17,10 @@ def _read_file_sftp(path, offset, length, host):
     # by the samples/samples->. symlink; Windows has none). So the 39 KB frida log with
     # the per-keystroke accumulator data was unreachable, costing 2 stalls + an escalation.
     # A path already rooted at samples/ (how every tool advertises its files) is used as-is.
-    if re.match(r"^([A-Za-z]:|[\\/])", path) or path.startswith(("samples/", "samples\\")):
+    if re.match(r"^([A-Za-z]:|[\\/])", path) or path.startswith((f"{_wd()}/", f"{_wdw()}\\")):
         p = path
     else:
-        p = f"samples/{path}"
+        p = f"{_wd()}/{path}"
     try:
         data = remote.read_bytes(p, host=host)
     except IOError:
@@ -38,13 +38,13 @@ def _read_file_sftp(path, offset, length, host):
                                  "all of it.")
     return VMResult(True, f"read {path} bytes {offset}..{end} (total {len(data)}){cap_note}",
                       detail=f"[{path} {offset}..{end}/{len(data)}]\n" + body,
-                      known=[f"read_file {path}[{offset}:{end}]"], flag=flag)
+                      known=[f"read_file {path}[{offset}:{end}]"], match=flag)
 
 
-def _read_file_one(path, offset=0, length=SLICE, host="kali"):
+def _read_file_one(path, offset=0, length=SLICE, host=None):
     offset = int(offset or 0)
     length, cap_note = _clamp_page(length)
-    if host == "windows":
+    if remote.is_windows(host):
         return _read_file_sftp(path, offset, length, host)
     # base64, NOT raw bytes: ssh_exec decodes the channel with errors="replace",
     # so every non-ASCII byte used to collapse into one U+FFFD character and
@@ -58,7 +58,7 @@ def _read_file_one(path, offset=0, length=SLICE, host="kali"):
         "sys.stdout.write(repr(len(d))+'|'+base64.b64encode(s).decode())"
     )
     out, err = remote.ssh_exec(
-        f"cd samples 2>/dev/null; python3 -c {shlex.quote(py)}", host=host, read_timeout=40,
+        f"cd {_wd()} 2>/dev/null; python3 -c {shlex.quote(py)}", host=host, read_timeout=40,
     )
     if err.strip() and not out.strip():
         e = err.strip()
@@ -88,15 +88,20 @@ def _read_file_one(path, offset=0, length=SLICE, host="kali"):
     return VMResult(True, f"read {path} bytes {offset}..{end} "
                             f"(total {total.strip()}){cap_note}",
                       detail=f"[{path} {offset}..{end}/{total.strip()}]\n" + body,
-                      known=[f"read_file {path}[{offset}:{end}]"], flag=flag)
+                      known=[f"read_file {path}[{offset}:{end}]"], match=flag)
 
 
-def read_file(path, offset=0, length=SLICE, host="kali", pinned_docs=()):
-    """Try the host asked for; if the file is not there, try the OTHER one before
-    failing. MEASURED ch8 run 1: four steps (16, 19, 27, 43) were spent asking for a
-    file on `windows` that a kali tool had written - each one a stall, and two of them
-    pushed the run to the expensive top tier. Which VM a tool saved its output on is
-    OUR bookkeeping, not a fact the Brain should have to remember."""
+def read_file(path, offset=0, length=SLICE, host=None, pinned_docs=()):
+    """Try the host asked for (None: the inventory's default host); if the file is not
+    there, try every other host of the inventory, in inventory order, before failing.
+    MEASURED ch8 run 1: four steps (16, 19, 27, 43) were spent asking for a file on
+    `windows` that a kali tool had written - each one a stall, and two of them pushed the
+    run to the expensive top tier. Which VM a tool saved its output on is OUR
+    bookkeeping, not a fact the Brain should have to remember."""
+    h, err = hosts.check(host, "read_file")
+    if err:
+        return err
+    host = h.name
     # Same pinned-doc guard as peek: the VM copy (samples/_analysis/FINDINGS.md) is the
     # same text the Brain already has whole in context (ch8 run 15 s56/s57 read it so).
     _p = str(path).replace("\\", "/")
@@ -110,18 +115,27 @@ def read_file(path, offset=0, length=SLICE, host="kali", pinned_docs=()):
     res = _read_file_one(path, offset=offset, length=length, host=host)
     if res.ok or "does not exist on" not in (res.summary or ""):
         return res
-    other = "kali" if host == "windows" else "windows"
-    try:
-        alt = _read_file_one(path, offset=offset, length=length, host=other)
-    except Exception:  # noqa: BLE001 - the fallback must never turn a miss into a crash
+    others = [n for n in hosts.names() if n != host]
+    checked = [host]
+    for other in others:
+        try:
+            alt = _read_file_one(path, offset=offset, length=length, host=other)
+        except Exception:  # noqa: BLE001 - the fallback must never turn a miss into a crash
+            continue          # an unreachable host is not "the file is missing"
+        checked.append(other)
+        if alt.ok:
+            alt.summary = (f"read_file: '{path}' is NOT on {host} but IS on {other} - "
+                           f"served it from {other}. " + alt.summary)
+            alt.known = [k + f"  (file lives on {other}, not {host})" for k in alt.known]
+            return alt
+        if "does not exist on" not in (alt.summary or ""):
+            # the file IS on `other`; this page failed for its own reason (e.g. past EOF)
+            alt.summary = f"read_file: '{path}' is NOT on {host}, it is on {other}: " + alt.summary
+            return alt
+    if len(checked) == 1:
         return res
-    if alt.ok:
-        alt.summary = (f"read_file: '{path}' is NOT on {host} but IS on {other} - "
-                       f"served it from {other}. " + alt.summary)
-        alt.known = [k + f"  (file lives on {other}, not {host})" for k in alt.known]
-        return alt
-    return VMResult(False, f"read_file: {path} exists on NEITHER {host} nor {other} "
-                             "(both checked just now). Nothing has written it yet - "
+    return VMResult(False, f"read_file: {path} exists on none of {', '.join(checked)} "
+                             "(all checked just now). Nothing has written it yet - "
                              "re-read the output of the tool that was supposed to "
                              "create it instead of reading the path again.")
 
@@ -140,8 +154,8 @@ def _wrap_cmd(command, host, timeout=20):
     signals the whole group, so forked children die too. Exit 124 = timed out.
     windows: NOT built here any more - _run_and_wrap sends Windows commands through
     remote.win_run_bounded, which gives them the same real, tree-killing timeout."""
-    if host == "windows":
-        return ("cd /d samples 2>nul & " + command +
+    if remote.is_windows(host):
+        return (f"cd /d {_wdw()} 2>nul & " + command +
                 " & if errorlevel 1 (echo __RC=1) else (echo __RC=0)")
     # Snapshot samples/ before and after, in the SAME shell, and report what changed.
     # Measured ch6 run 2 (2026-09-23): a hand-written run_script wrote 57262 bytes to
@@ -156,7 +170,9 @@ def _wrap_cmd(command, host, timeout=20):
     # every run_cmd that cd'd into a fresh clone reported README.md, CLAUDE.md, ... as new in samples/).
     snap = "find \"$__dvm_dir\" -maxdepth 1 -type f -printf '%f\\t%s\\n' 2>/dev/null | sort"
     inner = (
-        "cd samples 2>/dev/null\n"
+        # mkdir -p: on a fresh host (or a new LABHAND_WORKDIR) the cd used to fail silently and
+        # the command ran in $HOME (measured 2026-11-15).
+        f"mkdir -p {_wd()} 2>/dev/null; cd {_wd()} 2>/dev/null\n"
         "__dvm_dir=$(pwd)\n"
         "set -o pipefail\n"
         f"{snap} > /tmp/_pre.$$ 2>/dev/null\n"
@@ -297,9 +313,9 @@ def _run_and_wrap(command, host, timeout, label, grep_shape=None):
     flag scan. `label` is what shows up in the ledger (the command text, or a script
     description) so the two tools can phrase their summary differently. `grep_shape`
     (run_cmd only, see _grep_shape) lets an empty exit-1 grep be read as NO MATCH."""
-    if host == "windows":
+    if remote.is_windows(host):
         # real tree-killing timeout + the true exit code (see remote.win_run_bounded)
-        out, err = remote.win_run_bounded(command, timeout)
+        out, err = remote.win_run_bounded(command, timeout, host=host)
     else:
         out, err = remote.ssh_exec(
             _wrap_cmd(command, host, timeout), host=host, read_timeout=int(timeout) + 25
@@ -326,7 +342,7 @@ def _run_and_wrap(command, host, timeout, label, grep_shape=None):
     n = len(combined)
     sl, saved = _spill(host, combined, "cmd_out")
     if newfiles:
-        sl += ("\nFILES WRITTEN OR CHANGED in samples/ by this command: "
+        sl += (f"\nFILES WRITTEN OR CHANGED in {_wd()}/ by this command: "
                + "; ".join(f"{fn} ({fsz} bytes)" for fn, fsz in newfiles[:8])
                + '. Read one with read_file(path="<name>").')
     flag = _find_match(combined)
@@ -335,7 +351,7 @@ def _run_and_wrap(command, host, timeout, label, grep_shape=None):
            f"`timeout` if the work is genuinely long, e.g. an install or Ghidra), "
            if timed_out else
            "exit 1 because grep was given NO FILE to search - it read an empty stdin. "
-           "Add the file name (cwd is samples/), e.g. `grep -n PATTERN <file>`; "
+           f"Add the file name (cwd is {_wd()}/), e.g. `grep -n PATTERN <file>`; "
            if no_file else
            "shell aborted before finishing (syntax error?), " if rc is None else
            f"exit {rc}, " if failed else "")
@@ -348,7 +364,7 @@ def _run_and_wrap(command, host, timeout, label, grep_shape=None):
         known_fact = (f"{label} -> NO MATCH (grep exit 1 = the search ran and found "
                       "nothing; this is a result, not an error)")
     if newfiles:
-        known_fact += " | wrote " + ", ".join(f"samples/{fn} ({fsz}B)"
+        known_fact += " | wrote " + ", ".join(f"{_wd()}/{fn} ({fsz}B)"
                                               for fn, fsz in newfiles[:8])
     if saved:
         known_fact += f" (full -> {saved}, page with read_file)"
@@ -358,10 +374,10 @@ def _run_and_wrap(command, host, timeout, label, grep_shape=None):
                           info="")
     return VMResult(
         not failed,
-        f"ran on {host}: {label} -> {why}{n} chars" + ("; FLAG" if flag else ""),
+        f"ran on {host}: {label} -> {why}{n} chars" + ("; MATCH" if flag else ""),
         detail=sl,
         known=[] if failed else [known_fact],
-        flag=flag,
+        match=flag,
         info=sl,
     )
 
@@ -369,21 +385,23 @@ def _run_and_wrap(command, host, timeout, label, grep_shape=None):
 MAX_UPLOAD = 200 * 1024 * 1024
 
 
-def upload_file(local_path, name=None, host="kali"):
-    """Copy a file from the machine running dualvm into a VM's samples/ dir (the working dir of run_cmd /
+def upload_file(local_path, name=None, host=None):
+    """Copy a file from the machine running labhand into a VM's samples/ dir (the working dir of run_cmd /
     run_script). `name` is the path inside samples/ (may hold sub-dirs, e.g. 'data/x.bin'); default: the file's
     own name. The library always had this (remote.upload, used inside jobs and Frida), but no tool exposed it:
-    measured 2026-11-13, a worker that needed a 7 KB diff on Kali concluded "dualvm has no upload" and rebuilt
+    measured 2026-11-13, a worker that needed a 7 KB diff on Kali concluded "the library has no upload" and rebuilt
     the files from a GitHub clone instead. -> VMResult; nothing is interpreted."""
-    if host not in ("kali", "windows"):
-        return VMResult(False, f"upload_file: host must be 'kali' or 'windows', not {host!r}")
+    h, err = hosts.check(host, "upload_file")
+    if err:
+        return err
+    host = h.name
     src = os.path.expanduser(str(local_path or ""))
     if not os.path.isfile(src):
         return VMResult(False, f"upload_file: no such local file: {local_path}")
     rel = str(name or os.path.basename(src)).replace("\\", "/").strip()
     parts = [p for p in rel.split("/") if p not in ("", ".")]
     if not parts or rel.startswith("/") or ".." in parts or re.match(r"^[A-Za-z]:", rel):
-        return VMResult(False, "upload_file: `name` must be a relative path inside samples/ "
+        return VMResult(False, f"upload_file: `name` must be a relative path inside {_wd()}/ "
                                "(no '..', no absolute or drive path)")
     size = os.path.getsize(src)
     if size > MAX_UPLOAD:
@@ -394,41 +412,180 @@ def upload_file(local_path, name=None, host="kali"):
     except Exception as e:  # noqa: BLE001 - raw failure back to the caller
         return VMResult(False, f"upload_file: upload to {host} failed: {e}")
     return VMResult(True, f"uploaded {local_path} -> {host}:{remote_path} ({size} bytes)",
-                    detail=f"On {host} it is samples/{dest}: run_cmd / run_script start in samples/, "
+                    detail=f"On {host} it is {_wd()}/{dest}: run_cmd / run_script start in {_wd()}/, "
                            f"so refer to it as {dest}.",
-                    known=[f"{host}:samples/{dest} = {os.path.basename(src)} ({size} bytes)"])
+                    known=[f"{host}:{_wd()}/{dest} = {os.path.basename(src)} ({size} bytes)"])
 
 
-def run_cmd(command, host="kali", timeout=20):
+MAX_DOWNLOAD = 32 * 1024 ** 3          # default cap: a full-RAM memory dump still fits
+
+
+def download_dir(host):
+    """Default destination of download_file: $LABHAND_DOWNLOAD_DIR/<host>/, else
+    ~/labhand-downloads/<host>/ - outside any git checkout, since pulled files can be
+    malware samples or pcaps."""
+    base = os.environ.get("LABHAND_DOWNLOAD_DIR") or os.path.join("~", "labhand-downloads")
+    return os.path.join(os.path.abspath(os.path.expanduser(base)), host)
+
+
+def _git_checkout_of(path):
+    """The git work tree containing `path` (or the nearest existing parent), else None."""
+    cur = os.path.abspath(path)
+    while True:
+        if os.path.exists(os.path.join(cur, ".git")):
+            return cur
+        parent = os.path.dirname(cur)
+        if parent == cur:
+            return None
+        cur = parent
+
+
+def download_file(path, dest=None, host=None, overwrite=False, max_bytes=None, timeout=600):
+    """Copy a file from a lab host to the machine running labhand (the mirror of upload_file).
+
+    `path`: relative paths are inside the host's samples/ (as every tool reports them);
+    absolute paths (`/var/log/x`, `C:\\Windows\\x.dll`) are used as is. `dest`: a local file
+    path or an existing directory; default download_dir(host). The file is streamed over SFTP
+    in 1 MiB chunks straight to a temporary file next to the target and renamed into place
+    only when complete, so a multi-GB dump never sits in memory and a broken transfer
+    leaves nothing behind. An existing target is kept unless overwrite=True. A target inside
+    a git checkout is refused. The file is written without any execute bit; nothing here
+    ever runs it. `max_bytes` caps the size (default MAX_DOWNLOAD), `timeout` the whole
+    transfer in seconds. -> VMResult with size and sha256 in `known`; nothing interpreted."""
+    import secrets
+    import stat as _stat
+    h, err = hosts.check(host, "download_file")
+    if err:
+        return err
+    host = h.name
+    if not str(path or "").strip():
+        return VMResult(False, "download_file: `path` is empty")
+    cap = MAX_DOWNLOAD if max_bytes is None else int(max_bytes)
+    if cap < 0:
+        return VMResult(False, "download_file: max_bytes must be >= 0")
+    try:
+        timeout = int(timeout)
+    except (TypeError, ValueError):
+        return VMResult(False, "download_file: timeout must be a number of seconds")
+    rpath = remote.sftp_path(path, host)
+    base = re.split(r"[\\/]", rpath.rstrip("/\\"))[-1]
+    if not base or base in (".", ".."):
+        return VMResult(False, f"download_file: {path!r} does not name a file")
+
+    if dest:
+        target = os.path.abspath(os.path.expanduser(str(dest)))
+        if os.path.isdir(target) or str(dest).endswith(("/", "\\")):   # "dir/" = a folder
+            target = os.path.join(target, base)
+    else:
+        target = os.path.join(download_dir(host), base)
+    folder = os.path.dirname(target)
+    repo = _git_checkout_of(os.path.realpath(folder))     # a symlink into a repo counts
+    if repo:
+        return VMResult(False, f"download_file: {folder} is inside the git checkout {repo}; pulled "
+                               "files can be malware samples - pick a folder outside any repo "
+                               "(default: LABHAND_DOWNLOAD_DIR or ~/labhand-downloads/<host>/)")
+    if os.path.lexists(target) and not overwrite:
+        return VMResult(False, f"download_file: {target} already exists (pass overwrite=True "
+                               "to replace it)")
+    if os.path.isdir(target):
+        return VMResult(False, f"download_file: {target} is a directory")
+    try:
+        os.makedirs(folder, exist_ok=True)
+    except OSError as e:
+        return VMResult(False, f"download_file: cannot create {folder}: {e}")
+
+    def room(size):
+        free = shutil.disk_usage(folder).free
+        if size > free:
+            raise remote.DownloadError(f"{rpath} is {size} bytes but only {free} bytes are "
+                                       f"free in {folder}")
+
+    tmp = os.path.join(folder, f".{base}.{secrets.token_hex(4)}.part")
+    try:
+        # 0o600, no execute bit, and O_EXCL so two downloads never share a temp file
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), 0o600)
+        with os.fdopen(fd, "wb") as fh:
+            size, digest = remote.download_to(rpath, fh, host=host, max_bytes=cap,
+                                              timeout=timeout, on_size=room)
+        if overwrite:
+            os.replace(tmp, target)
+        else:
+            try:
+                os.link(tmp, target)       # atomic "create only if absent"
+                os.unlink(tmp)
+            except FileExistsError:
+                os.unlink(tmp)
+                return VMResult(False, f"download_file: {target} appeared while copying; kept it "
+                                       "(pass overwrite=True to replace it)")
+            except OSError:                # a filesystem without hard links
+                if os.path.lexists(target):
+                    os.unlink(tmp)
+                    return VMResult(False, f"download_file: {target} already exists")
+                os.replace(tmp, target)
+        os.chmod(target, _stat.S_IRUSR | _stat.S_IWUSR)
+    except remote.DownloadError as e:
+        _unlink_quiet(tmp)
+        return VMResult(False, f"download_file: {e}")
+    except FileNotFoundError:
+        _unlink_quiet(tmp)
+        return VMResult(False, f"download_file: {path} does not exist on {host} ({rpath})")
+    except TimeoutError:                 # socket.timeout: the channel went silent
+        _unlink_quiet(tmp)
+        return VMResult(False, f"download_file: the transfer from {host} stalled (no data for "
+                               f"{min(60, max(1, timeout))}s, read timeout); nothing was kept")
+    except Exception as e:  # noqa: BLE001 - raw failure back to the caller
+        _unlink_quiet(tmp)
+        return VMResult(False, f"download_file: copy from {host} failed: {e.__class__.__name__}: {e}")
+    return VMResult(True, f"downloaded {host}:{rpath} -> {target} ({size} bytes)",
+                    detail=f"sha256 {digest}\n{size} bytes\nlocal copy: {target} (mode 0600, "
+                           "never executed by labhand)",
+                    known=[f"{host}:{rpath} -> {target}", f"size {size} bytes", f"sha256 {digest}"])
+
+
+def _unlink_quiet(p):
+    try:
+        os.unlink(p)
+    except OSError:
+        pass
+
+
+def run_cmd(command, host=None, timeout=20):
+    h, err = hosts.check(host, "run_cmd")
+    if err:
+        return err
     blocked = _security_block(command)
     if blocked:
-        return VMResult(False, f"blocked: this command touches {blocked}, which is "
-                                 "not permitted (see tool description) - it is never "
-                                 "needed to solve a challenge; find another way.")
-    return _run_and_wrap(command, host, timeout, _cmd_label(command),
-                         grep_shape=_grep_shape(command) if host != "windows" else None)
+        return VMResult(False, f"blocked: this command would run {blocked}, which only "
+                                 "wrecks the VM's disk (labhand.safety refuses rm -rf /, "
+                                 "mkfs/diskpart and format X:); find another way.")
+    return _run_and_wrap(command, h.name, timeout, _cmd_label(command),
+                         grep_shape=None if h.is_windows else _grep_shape(command))
 
 
-def run_script(script, host="kali", kind=None, timeout=20, python=None):
+def run_script(script, host=None, kind=None, timeout=20, python=None):
+    h, err = hosts.check(host, "run_script")
+    if err:
+        return err
+    host = h.name
     blocked = _security_block(script)
     if blocked:
-        return VMResult(False, f"blocked: this script touches {blocked}, which is "
-                                 "not permitted (see tool description) - it is never "
-                                 "needed to solve a challenge; find another way.")
-    kind = kind or ("powershell" if host == "windows" else "bash")
+        return VMResult(False, f"blocked: this script would run {blocked}, which only "
+                                 "wrecks the VM's disk (labhand.safety refuses rm -rf /, "
+                                 "mkfs/diskpart and format X:); find another way.")
+    kind = kind or ("powershell" if h.is_windows else "bash")
     exts = {"bash": "sh", "python3": "py", "powershell": "ps1", "cmd": "bat"}
     if kind not in exts:
         return VMResult(False, f"run_script: unknown kind '{kind}' (use one of {list(exts)})")
     name = f"_script.{exts[kind]}"
-    remote.write_remote(f"samples/{name}", script, host=host)
+    remote.write_remote(f"{_wd()}/{name}", script, host=host)
     # The python3 interpreter is PER HOST. Until 2026-09-23 this always used
     # remote.KALI_PYTHON (/home/vahpem/analysis-venv/bin/python3), bash-quoted, so
     # run_script(kind="python3", host="windows") asked cmd.exe to run a Linux path in
     # single quotes - it could never work.
-    if host == "windows":
-        py_invoke = f'"{python or remote.WIN_PYTHON_EXE}" {name}'
+    if h.is_windows:
+        py_invoke = f'"{python or h.python}" {name}'
     else:
-        py_invoke = f"{shlex.quote(python or remote.KALI_PYTHON)} {name}"
+        py_invoke = f"{shlex.quote(python or h.python)} {name}"
     invoke = {
         "bash": f"bash {name}",
         "python3": py_invoke,

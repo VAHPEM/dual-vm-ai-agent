@@ -223,12 +223,12 @@ def check_keys(rep):
                  "told to record it itself)")
 
 
-def check_dualvm(rep):
+def check_labhand(rep):
     env = dict(os.environ, PYTHONPATH=REPO)
-    code, out = _run([sys.executable, "-c", "import dualvm.shell"], env=env)
+    code, out = _run([sys.executable, "-c", "import labhand.shell"], env=env)
     last = (out.strip().splitlines() or [""])[-1][:200]
-    (rep.ok if code == 0 else rep.warn)("dualvm importable (vm_check can reach the VMs)" if code == 0 else
-                                        f"dualvm not importable here; vm_check will fail: {last}")
+    (rep.ok if code == 0 else rep.warn)("labhand importable (vm_check can reach the VMs)" if code == 0 else
+                                        f"labhand not importable here; vm_check will fail: {last}")
 
 
 def doctor(run=None, project=None, claude=None):
@@ -240,5 +240,5 @@ def doctor(run=None, project=None, claude=None):
     if project:
         check_project(rep, project)
     check_keys(rep)
-    check_dualvm(rep)
+    check_labhand(rep)
     return rep

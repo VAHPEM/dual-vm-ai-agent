@@ -220,7 +220,7 @@ def build_nudge(L, g, text, lh=None, waiting=None, answered=(), flags=(), asked=
             + ". Work on other nodes meanwhile and check their output when they finish.")
     if waiting:
         lines.append(f"Job {waiting['job']} on {waiting['host']} is registered as running for node "
-                     f"{waiting['node']}. Poll it (dualvm.jobs.job_poll) and record its output before "
+                     f"{waiting['node']}. Poll it (labhand.jobs.job_poll) and record its output before "
                      "starting something else.")
     for q in answered:
         lines.append(f"The human answered question #{q['id']} ({q['kind']}): {q['answer']}")

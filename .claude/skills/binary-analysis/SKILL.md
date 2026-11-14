@@ -4,20 +4,20 @@ description: >-
   Disciplined methodology for analysing an unknown file, binary or program on the
   dual-VM lab: how to reason (state assumptions, measure before reading, static vs
   dynamic, invert instead of brute-force) and which VM tool to reach for at each
-  step. Load it before analysing a target with dualvm. Covers reverse engineering,
+  step. Load it before analysing a target with labhand. Covers reverse engineering,
   crypto, parameter reasoning, Python bytecode, large traces, and tooling gotchas.
 ---
 
 # binary-analysis
 
 Reasoning playbook for analysing an unknown target while driving the two VMs with
-`dualvm`. The **discipline** (R1-R10) and the **technique notes** below are the
+`labhand`. The **discipline** (R1-R10) and the **technique notes** below are the
 method; this short intro maps each move to the tool that performs it. Keep raw
-measurement (the Muscle, `dualvm`) and conclusions (the caller) separate: the
+measurement (the Muscle, `labhand`) and conclusions (the caller) separate: the
 library only runs things and returns raw output - the discipline here is the
 caller's.
 
-## How the method maps to dualvm tools
+## How the method maps to labhand tools
 
 - **Cheap static survey:** `shell.run_cmd` for `file` / `xxd` / `strings` /
   `objdump` / `readelf` / `rabin2`; page a dumped blob with `shell.read_file`.
@@ -32,7 +32,7 @@ caller's.
 - **Write a solver that is efficient, not brute:** `shell.run_script` (print every
   value); a heavy search runs as a background job via `jobs.job_start` /
   `jobs.job_poll`.
-- **Confirm a result:** the caller's matcher (`dualvm.set_matcher`) surfaces a
+- **Confirm a result:** the caller's matcher (`labhand.set_matcher`) surfaces a
   target string in any raw output.
 
 === MANDATORY RULES — DO NOT DERAIL ===

@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
-"""dualvm.shell: the samples/ change report and upload_file. No VM is contacted: the wrapper runs in a local bash
+"""labhand.shell: the samples/ change report and upload_file. No VM is contacted: the wrapper runs in a local bash
 (Linux, GNU find) and remote.upload is monkeypatched."""
 import shutil
 import subprocess
 
 import pytest
 
-from dualvm import shell
+from labhand import shell
 
 _GNU = shutil.which("bash") and shutil.which("timeout") and subprocess.run(
     ["find", ".", "-maxdepth", "0", "-printf", ""], capture_output=True).returncode == 0
@@ -61,7 +61,7 @@ def test_upload_file_reports_missing_files_bad_hosts_and_failures(monkeypatch, t
     assert "no such local file" in shell.upload_file(str(tmp_path / "nope")).summary
     src = tmp_path / "f.bin"
     src.write_bytes(b"1")
-    assert "host must be" in shell.upload_file(str(src), host="mac").summary
+    assert "unknown host 'mac'; known hosts: kali, windows" in shell.upload_file(str(src), host="mac").summary
 
     def boom(*a, **k):
         raise OSError("Failure")

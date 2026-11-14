@@ -36,8 +36,8 @@ shows the ledger). When it is:
 - **Nearly there?** `claim_near_done(node, remaining_steps=[...])` with the concrete
   steps. You will be held to them. Repeated claims without new evidence trigger a
   review of the assumption behind the claim.
-- **Waiting on a background job** (`dualvm.jobs.job_start`)? `mark_waiting(node, job)`
-  so the wait is not counted as idle, then poll with `dualvm.jobs.job_poll` and
+- **Waiting on a background job** (`labhand.jobs.job_start`)? `mark_waiting(node, job)`
+  so the wait is not counted as idle, then poll with `labhand.jobs.job_poll` and
   attach the output.
 - **Keep the VM honest.** `vm_check(host, node_id)` before an approach that depends on a
   clean VM and before declaring such an approach a dead end: leftover processes, a bound

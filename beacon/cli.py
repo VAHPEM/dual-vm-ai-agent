@@ -282,7 +282,7 @@ def cmd_setup_project(args):
     from .project import setup_project
     py = args.python or sys.executable
     changes = setup_project(args.project, py, args.mcp_python or py, shared=args.shared,
-                            allow_dualvm=args.allow_dualvm, dry_run=args.dry_run, quiet_shell=args.quiet_shell)
+                            allow_labhand=args.allow_labhand, dry_run=args.dry_run, quiet_shell=args.quiet_shell)
     print(("Would change:" if args.dry_run else "Changed:") if changes else "Already set up; nothing to change.")
     for c in changes:
         print("  " + c)
@@ -478,8 +478,9 @@ def build_parser():
     p.add_argument("--python", help="python for the hooks (stdlib only; default: this interpreter)")
     p.add_argument("--mcp-python", help="python with the `mcp` package (default: --python)")
     p.add_argument("--shared", action="store_true", help="write .claude/settings.json instead of settings.local.json")
-    p.add_argument("--allow-dualvm", action="store_true",
-                   help="also pre-approve every dualvm MCP tool (they act on the VMs; your call)")
+    p.add_argument("--allow-labhand", "--allow-dualvm", dest="allow_labhand", action="store_true",
+                   help="also pre-approve every labhand MCP tool, under the server name labhand and the "
+                        "pre-rename dualvm (they act on the VMs; your call). --allow-dualvm is the old spelling")
     p.add_argument("--quiet-shell", action="store_true",
                    help="set respondToBashCommands=false: `! .claude/beacon log` output gets no model reply")
     p.add_argument("--dry-run", action="store_true")
@@ -526,7 +527,7 @@ def build_parser():
     p.add_argument("--claude", default="claude", help="path to the claude CLI")
     p.add_argument("extra", nargs=argparse.REMAINDER, help="further arguments for claude")
     p.set_defaults(fn=cmd_claude)
-    p = with_run(sub.add_parser("doctor", help="check python, claude CLI, project wiring, keys, dualvm"))
+    p = with_run(sub.add_parser("doctor", help="check python, claude CLI, project wiring, keys, labhand"))
     p.add_argument("--project", help="worker project directory to check")
     p.add_argument("--claude", help="path to the claude CLI (default: PATH)")
     p.set_defaults(fn=cmd_doctor)

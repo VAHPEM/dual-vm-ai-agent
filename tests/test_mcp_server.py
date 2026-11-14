@@ -16,16 +16,17 @@ import pytest
 
 pytest.importorskip("mcp")
 
-from dualvm import mcp_server, shell, windows  # noqa: E402
-from dualvm._result import VMResult  # noqa: E402
+from labhand import mcp_server, shell, windows  # noqa: E402
+from labhand._result import VMResult  # noqa: E402
 
 EXPECTED_TOOLS = {
     "run_cmd", "run_script", "read_file", "job_start", "job_poll",
     "win_windows", "win_screenshot", "win_gui_run", "win_frida", "win_ui_tree",
     "win_ui_click", "win_ui_type", "win_key", "win_ui_seq",
-    "linux_gui_run", "linux_gdb", "upload_file",
+    "linux_gui_run", "linux_gdb", "upload_file", "download_file",
+    "vm_status", "vm_start", "vm_stop", "vm_revert", "vm_snapshot",
 }
-READ_ONLY = {"read_file", "win_windows", "win_screenshot", "win_ui_tree"}
+READ_ONLY = {"read_file", "win_windows", "win_screenshot", "win_ui_tree", "vm_status"}
 HINTS = ("readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint")
 
 # 1x1 transparent PNG
@@ -140,7 +141,7 @@ def test_call_tool_passes_arguments_and_returns_text(monkeypatch):
 def test_call_tool_screenshot_returns_image_content(monkeypatch):
     img = {"media_type": "image/png", "data": base64.b64encode(PNG).decode()}
     monkeypatch.setattr(windows, "win_screenshot",
-                        lambda timeout=40: VMResult(True, "shot", image=img))
+                        lambda timeout=40, host=None: VMResult(True, "shot", image=img))
     blocks = _blocks(asyncio.run(mcp_server.mcp.call_tool("win_screenshot", {})))
     images = [b for b in blocks if getattr(b, "type", "") == "image"]
     assert len(images) == 1
@@ -189,7 +190,7 @@ def _read_response(proc, want_id):
 def test_stdio_tools_list_carries_annotations():
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     env = dict(os.environ, PYTHONPATH=root + os.pathsep + os.environ.get("PYTHONPATH", ""))
-    proc = subprocess.Popen([sys.executable, "-m", "dualvm.mcp_server"], cwd=root, env=env,
+    proc = subprocess.Popen([sys.executable, "-m", "labhand.mcp_server"], cwd=root, env=env,
                             stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                             stderr=subprocess.PIPE, text=True)
     # readline() has no timeout: if the server hangs, kill it so the test fails
@@ -199,9 +200,9 @@ def test_stdio_tools_list_carries_annotations():
     try:
         _rpc(proc, {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
             "protocolVersion": "2025-06-18", "capabilities": {},
-            "clientInfo": {"name": "dualvm-tests", "version": "0"}}})
+            "clientInfo": {"name": "labhand-tests", "version": "0"}}})
         init = _read_response(proc, 1)
-        assert init["result"]["serverInfo"]["name"] == "dualvm"
+        assert init["result"]["serverInfo"]["name"] == "labhand"
         _rpc(proc, {"jsonrpc": "2.0", "method": "notifications/initialized"})
         _rpc(proc, {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}})
         tools = {t["name"]: t for t in _read_response(proc, 2)["result"]["tools"]}

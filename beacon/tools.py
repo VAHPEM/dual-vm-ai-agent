@@ -164,10 +164,10 @@ def ask(L, kind, question, node_id="", options=None, context=""):
 @_tool
 def mark_waiting(L, node_id, job, host="kali", max_minutes=30):
     w = L.mark_waiting(node_id, job, host=host, max_minutes=max_minutes, actor="worker")
-    return f"waiting on job {w['job']} ({w['host']}) for up to {w['minutes']} min; poll it with dualvm.jobs.job_poll"
+    return f"waiting on job {w['job']} ({w['host']}) for up to {w['minutes']} min; poll it with labhand.jobs.job_poll"
 
 
-VM_RUNNER = None   # tests inject a fake; None = dualvm.shell.run_script
+VM_RUNNER = None   # tests inject a fake; None = labhand.shell.run_script
 
 
 @_tool

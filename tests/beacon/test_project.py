@@ -134,3 +134,20 @@ def test_shellrun_runs_posix_shell_and_decodes_utf8(tmp_path):
         pytest.skip("no Git Bash on this Windows machine")
     r = shellrun.run('printf "%s" "$X"', env=dict(os.environ, X="mũi tên ▸"), cwd=str(tmp_path), timeout=30)
     assert r.returncode == 0 and r.stdout == "mũi tên ▸"
+
+
+@pytest.mark.parametrize("kw", [{"allow_labhand": True}, {"allow_dualvm": True}])
+def test_allow_labhand_preapproves_both_server_names(tmp_path, kw):
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    setup_project(str(proj), "/usr/bin/python3", "/venv/bin/python", **kw)
+    allow = json.loads((proj / ".claude" / "settings.local.json").read_text())["permissions"]["allow"]
+    assert {"mcp__beacon", "mcp__labhand", "mcp__dualvm"} <= set(allow)
+
+
+@pytest.mark.parametrize("flag", ["--allow-labhand", "--allow-dualvm"])
+def test_cli_allow_flag_and_its_old_spelling(flag):
+    from beacon.cli import build_parser
+    args = build_parser().parse_args(["setup-project", "/p", flag])
+    assert args.allow_labhand is True
+    assert build_parser().parse_args(["setup-project", "/p"]).allow_labhand is False
