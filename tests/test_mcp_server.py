@@ -140,7 +140,7 @@ def test_call_tool_passes_arguments_and_returns_text(monkeypatch):
 def test_call_tool_screenshot_returns_image_content(monkeypatch):
     img = {"media_type": "image/png", "data": base64.b64encode(PNG).decode()}
     monkeypatch.setattr(windows, "win_screenshot",
-                        lambda timeout=40: VMResult(True, "shot", image=img))
+                        lambda timeout=40, host=None: VMResult(True, "shot", image=img))
     blocks = _blocks(asyncio.run(mcp_server.mcp.call_tool("win_screenshot", {})))
     images = [b for b in blocks if getattr(b, "type", "") == "image"]
     assert len(images) == 1

@@ -34,7 +34,7 @@ $s = [System.Security.Cryptography.SHA256]::Create(); ([BitConverter]::ToString(
 
 # Names that come and go on their own or belong to the probe itself.
 _NOISE = {
-    "kali": re.compile(r"^(ps|sort|sha256sum|cut|find|bash|sh|dash|awk|ss|netstat|tail|sleep|timeout|sshd|"
+    "linux": re.compile(r"^(ps|sort|sha256sum|cut|find|bash|sh|dash|awk|ss|netstat|tail|sleep|timeout|sshd|"
                        r"sshd-session|sudo|systemd-.*|kworker.*|ksoftirqd.*|migration.*|rcu_.*|cpuhp.*|"
                        r"idle_inject.*|irq/.*|kthreadd|.*/.*)$"),
     "windows": re.compile(r"^(powershell|conhost|cmd|sshd|sshd-session|WmiPrvSE|RuntimeBroker|"
@@ -47,6 +47,26 @@ class VMStateError(Exception):
     pass
 
 
+_LEGACY_OS = {"kali": "linux", "windows": "windows"}
+
+
+def host_os(host):
+    """'linux' or 'windows' for a lab host: from labhand's inventory (the probe follows the
+    host's OS, never its name); without labhand, the two pre-inventory names."""
+    try:
+        from labhand import hosts
+    except ImportError:
+        hosts = None
+    if hosts is not None:
+        try:
+            return hosts.get(host).os
+        except hosts.HostError as e:
+            raise VMStateError(str(e)) from None
+    if host in _LEGACY_OS:
+        return _LEGACY_OS[host]
+    raise VMStateError("host must be kali or windows")
+
+
 def labhand_runner(script, host, kind):
     """Default runner: labhand.shell.run_script (imported lazily; needs the lab). No dualvm
     fallback: dualvm is a shim over labhand, so it fails whenever labhand does."""
@@ -55,7 +75,7 @@ def labhand_runner(script, host, kind):
     return bool(r.ok), r.detail or r.summary or ""
 
 
-def parse(text, host):
+def parse(text, host, os_name=None):
     sections, cur = {"PROC": [], "PORTS": [], "FILES": []}, None
     for raw in (text or "").splitlines():
         line = raw.strip().strip("\r")
@@ -68,21 +88,20 @@ def parse(text, host):
     digests = [x.lower() for x in sections["FILES"] if re.fullmatch(r"[0-9a-fA-F]{16}", x)]
     if not digests:
         raise VMStateError("probe output had no samples/ digest (did the probe run?)")
-    noise = _NOISE.get(host)
+    noise = _NOISE.get(os_name or host_os(host))
     procs = sorted({p for p in sections["PROC"] if not (noise and noise.match(p))})
     ports = sorted(set(sections["PORTS"]))
     return {"host": host, "processes": procs, "ports": ports, "files": digests[-1]}
 
 
 def fingerprint(host, runner=None):
-    if host not in ("kali", "windows"):
-        raise VMStateError("host must be kali or windows")
+    os_name = host_os(host)
     runner = runner or labhand_runner
-    script, kind = (KALI_PROBE, "bash") if host == "kali" else (WIN_PROBE, "powershell")
+    script, kind = (WIN_PROBE, "powershell") if os_name == "windows" else (KALI_PROBE, "bash")
     ok, text = runner(script, host, kind)
     if not ok:
         raise VMStateError(f"probe failed on {host}: {str(text)[:300]}")
-    return parse(text, host)
+    return parse(text, host, os_name)
 
 
 def diff(base, now):

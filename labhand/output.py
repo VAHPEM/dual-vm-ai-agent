@@ -60,7 +60,7 @@ def _spill(host, text, stem="out"):
     saved = _save_to_host(host, name, text)
     if len(text) <= budget + tail_n:
         return text, saved                     # fits one turn: show whole, file kept
-    host_arg = "" if host == "kali" else f', host="{host}"'
+    host_arg = f', host="{host}"'                # always explicit: no host name is special
     if saved:
         where = (f'FULL output is {len(text)} chars; this is the head and tail. '
                  f'Read the rest with read_file(path="{name}"{host_arg})')

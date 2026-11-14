@@ -29,6 +29,10 @@ auto-approve and what to confirm with the user:
 * openWorldHint   - the tool can reach beyond the lab hosts (an arbitrary command or
                     program may use the network).
 
+`host` is a name from the lab inventory (LABHAND_HOSTS in .env, or the pre-inventory
+kali / windows); omitted, it is the first host (for win_* the first windows host, for
+linux_* the first linux host). An unknown name is refused before anything connects.
+
 These are hints for the client UI, not a security boundary. `labhand.safety` only
 refuses three disk-wrecking commands (recursive delete of /, mkfs / diskpart,
 `format X:`); security/system configuration (Defender, firewall, registry, services,
@@ -85,8 +89,8 @@ def _emit(r):
 
 # --- chay lenh / doc output -------------------------------------------------
 @mcp.tool(annotations=_act("Run shell command on a VM"))
-def run_cmd(command: str, host: str = "kali", timeout: int = 20):
-    """Run a one-line shell command on a VM (kali=bash, windows=cmd.exe), in the
+def run_cmd(command: str, host: str | None = None, timeout: int = 20):
+    """Run a one-line shell command on a VM (bash on a linux host, cmd.exe on a windows host), in the
     samples/ working dir, and return its raw output. Security/system settings
     (Defender, firewall, registry, services, accounts) may be changed freely on the lab
     VMs; only rm -rf /, mkfs/diskpart and `format X:` are refused."""
@@ -94,17 +98,17 @@ def run_cmd(command: str, host: str = "kali", timeout: int = 20):
 
 
 @mcp.tool(annotations=_act("Run script on a VM"))
-def run_script(script: str, host: str = "kali", kind: str | None = None,
+def run_script(script: str, host: str | None = None, kind: str | None = None,
                timeout: int = 20, python: str | None = None):
-    """Write a multi-line script to the VM and run it (bash/python3 on kali;
-    powershell/cmd on windows). Returns combined output. Same filter as run_cmd:
+    """Write a multi-line script to the VM and run it (bash/python3 on a linux host;
+    powershell/cmd on a windows host). Returns combined output. Same filter as run_cmd:
     only rm -rf /, mkfs/diskpart and `format X:` are refused."""
     return _emit(shell.run_script(script, host=host, kind=kind, timeout=timeout,
                                   python=python))
 
 
 @mcp.tool(annotations=_act("Upload a local file to a VM", idempotent=True, open_world=False))
-def upload_file(local_path: str, name: str | None = None, host: str = "kali"):
+def upload_file(local_path: str, name: str | None = None, host: str | None = None):
     """Copy a file from this machine (where the labhand MCP server runs) into the VM's samples/ dir, the
     working dir of run_cmd and run_script. `name` is the path inside samples/ (sub-dirs allowed); default:
     the file's own name. An existing file of that name is replaced."""
@@ -112,106 +116,106 @@ def upload_file(local_path: str, name: str | None = None, host: str = "kali"):
 
 
 @mcp.tool(annotations=_observe("Read file on a VM"))
-def read_file(path: str, offset: int = 0, length: int = 4000, host: str = "kali"):
+def read_file(path: str, offset: int = 0, length: int = 4000, host: str | None = None):
     """Read a byte slice of a file that lives on a VM (pages large files)."""
     return _emit(shell.read_file(path, offset=offset, length=length, host=host))
 
 
 # --- Windows desktop: doc man hinh / chup man hinh / chay GUI ---------------
 @mcp.tool(annotations=_observe("List Windows desktop windows"))
-def win_windows(match: str | None = None, timeout: int = 40):
+def win_windows(match: str | None = None, timeout: int = 40, host: str | None = None):
     """List the open windows on the Windows VM's interactive desktop as text
     (process, title, UI-Automation class/control type). Pass `match` to dump the
     inner text of one window."""
-    return _emit(windows.win_windows(match=match, timeout=timeout))
+    return _emit(windows.win_windows(match=match, timeout=timeout, host=host))
 
 
 @mcp.tool(annotations=_observe("Screenshot Windows desktop"))
-def win_screenshot(timeout: int = 40):
+def win_screenshot(timeout: int = 40, host: str | None = None):
     """Capture the Windows VM's interactive desktop as an image."""
-    return _emit(windows.win_screenshot(timeout=timeout))
+    return _emit(windows.win_screenshot(timeout=timeout, host=host))
 
 
 @mcp.tool(annotations=_act("Run GUI program on Windows"))
 def win_gui_run(program: str, args: str = "", wait: int = 6, kill: bool = True,
-                screenshot: bool = True, timeout: int = 60):
+                screenshot: bool = True, timeout: int = 60, host: str | None = None):
     """Run a program on the Windows desktop, wait, then report windows + a
     screenshot."""
     return _emit(windows.win_gui_run(program, args=args, wait=wait, kill=kill,
-                                     screenshot=screenshot, timeout=timeout))
+                                     screenshot=screenshot, timeout=timeout, host=host))
 
 
 @mcp.tool(annotations=_act("Frida-instrument a Windows process"))
 def win_frida(script: str, program: str | None = None, args: str = "",
               pid: int | None = None, wait: int = 8, kill: bool = True, desktop: bool = False,
-              max_lines: int = 800, timeout: int = 90):
+              max_lines: int = 800, timeout: int = 90, host: str | None = None):
     """Instrument a Windows process with a Frida JavaScript script (spawn by
     `program` or attach by `pid`); returns every send()/log() line."""
     return _emit(windows.win_frida(script, program=program, args=args, pid=pid,
                                    wait=wait, kill=kill, desktop=desktop,
-                                   max_lines=max_lines, timeout=timeout))
+                                   max_lines=max_lines, timeout=timeout, host=host))
 
 
 @mcp.tool(annotations=_observe("Dump Windows UI control tree"))
-def win_ui_tree(match: str | None = None, limit: int = 250, timeout: int = 45):
+def win_ui_tree(match: str | None = None, limit: int = 250, timeout: int = 45, host: str | None = None):
     """Dump the control tree (UI Automation + Win32) of a Windows window."""
-    return _emit(windows.win_ui_tree(match=match, limit=limit, timeout=timeout))
+    return _emit(windows.win_ui_tree(match=match, limit=limit, timeout=timeout, host=host))
 
 
 @mcp.tool(annotations=_act("Click Windows UI control"))
 def win_ui_click(hwnd: int | None = None, target: str | None = None, window: str | None = None,
-                 x: int | None = None, y: int | None = None, after: int = 1, timeout: int = 45):
+                 x: int | None = None, y: int | None = None, after: int = 1, timeout: int = 45, host: str | None = None):
     """Click a control (by handle, name, or coordinates) on the Windows desktop."""
     return _emit(windows.win_ui_click(hwnd=hwnd, target=target, window=window,
-                                      x=x, y=y, after=after, timeout=timeout))
+                                      x=x, y=y, after=after, timeout=timeout, host=host))
 
 
 @mcp.tool(annotations=_act("Type text into Windows UI"))
 def win_ui_type(text: str, hwnd: int | None = None, target: str | None = None, window: str | None = None,
                 enter: bool = False, sendkeys: bool = False, after: int = 1,
-                timeout: int = 45):
+                timeout: int = 45, host: str | None = None):
     """Type text into a control / the focused window on the Windows desktop."""
     return _emit(windows.win_ui_type(text, hwnd=hwnd, target=target, window=window,
                                      enter=enter, sendkeys=sendkeys, after=after,
-                                     timeout=timeout))
+                                     timeout=timeout, host=host))
 
 
 @mcp.tool(annotations=_act("Send keystrokes on Windows"))
-def win_key(keys: str, window: str | None = None, after: int = 1, timeout: int = 45):
+def win_key(keys: str, window: str | None = None, after: int = 1, timeout: int = 45, host: str | None = None):
     """Send keystrokes (SendKeys syntax) to a window on the Windows desktop."""
-    return _emit(windows.win_key(keys, window=window, after=after, timeout=timeout))
+    return _emit(windows.win_key(keys, window=window, after=after, timeout=timeout, host=host))
 
 
 @mcp.tool(annotations=_act("Click sequence of Windows UI controls"))
 def win_ui_seq(clicks: str, window: str | None = None, pause: int = 250, after: int = 2,
-               limit: int = 250, timeout: int = 120):
+               limit: int = 250, timeout: int = 120, host: str | None = None):
     """Click a sequence of named controls in one pass on the Windows desktop."""
     return _emit(windows.win_ui_seq(clicks, window=window, pause=pause, after=after,
-                                    limit=limit, timeout=timeout))
+                                    limit=limit, timeout=timeout, host=host))
 
 
 # --- Linux: GUI headless / debugger -----------------------------------------
 @mcp.tool(annotations=_act("Run GUI program on Kali (Xvfb)"))
 def linux_gui_run(command: str, wait: int = 5, screen: str = "1280x800x24",
-                  timeout: int = 60):
+                  timeout: int = 60, host: str | None = None):
     """Run a GUI program on Kali under Xvfb and return a screenshot."""
     return _emit(linux.linux_gui_run(command, wait=wait, screen=screen,
-                                     timeout=timeout))
+                                     timeout=timeout, host=host))
 
 
 @mcp.tool(annotations=_act("Run gdb-python script on Kali"))
 def linux_gdb(prog: str, script: str, args: str = "", gui: bool = True,
-              screen: str = "1280x800x24", max_lines: int = 800, timeout: int = 120):
+              screen: str = "1280x800x24", max_lines: int = 800, timeout: int = 120, host: str | None = None):
     """Run a gdb-python script against an ELF on Kali (ASLR off, PIE base fixed);
     returns whatever the script log()s / prints."""
     return _emit(linux.linux_gdb(prog, script, args=args, gui=gui, screen=screen,
-                                 max_lines=max_lines, timeout=timeout))
+                                 max_lines=max_lines, timeout=timeout, host=host))
 
 
 # --- viec nen ----------------------------------------------------------------
 @mcp.tool(annotations=_act("Start background job on a VM"))
 def job_start(name: str, command: str | None = None, script: str | None = None,
-              host: str = "kali", python: str | None = None, truncated: bool = False):
+              host: str | None = None, python: str | None = None, truncated: bool = False):
     """Start a background job on a VM and return immediately with its pid."""
     return _emit(jobs.job_start(name, command=command, script=script, host=host,
                                 python=python, truncated=truncated))
@@ -222,7 +226,7 @@ def job_start(name: str, command: str | None = None, script: str | None = None,
 @mcp.tool(annotations=_act("Poll / stop background job", idempotent=True,
                            open_world=False))
 def job_poll(name: str | None = None, tail: int = 40, grep: str | None = None,
-             stop: bool = False, host: str = "kali"):
+             stop: bool = False, host: str | None = None):
     """Check / tail / stop a background job (omit `name` to list all jobs)."""
     return _emit(jobs.job_poll(name=name, tail=tail, grep=grep, stop=stop, host=host))
 

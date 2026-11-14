@@ -61,7 +61,7 @@ def test_upload_file_reports_missing_files_bad_hosts_and_failures(monkeypatch, t
     assert "no such local file" in shell.upload_file(str(tmp_path / "nope")).summary
     src = tmp_path / "f.bin"
     src.write_bytes(b"1")
-    assert "host must be" in shell.upload_file(str(src), host="mac").summary
+    assert "unknown host 'mac'; known hosts: kali, windows" in shell.upload_file(str(src), host="mac").summary
 
     def boom(*a, **k):
         raise OSError("Failure")

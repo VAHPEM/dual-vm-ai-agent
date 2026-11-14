@@ -45,8 +45,24 @@ Lab hosts reachable over SSH with one key. Point the package at your `.env` and 
 
 The pre-rename names `DUALVM_ENV` / `DUALVM_SSH_KEY` are read when the `LABHAND_*` one is unset.
 
-`.env` keys: `KALI_HOST`, `KALI_USER`, `WIN_HOST`, `WIN_USER`, and optionally
-`WIN_PYTHON_EXE`, `KALI_PYTHON`. The key is never printed or committed.
+Hosts are a named inventory in `.env` (see [`.env.example`](.env.example)):
+
+```bash
+LABHAND_HOSTS=kali,windows          # the first one is the default host
+KALI_HOST=192.168.64.5              # per host: <NAME>_HOST, <NAME>_USER, <NAME>_OS
+KALI_USER=analyst
+KALI_OS=linux                       # linux | windows
+KALI_PYTHON=/home/analyst/venv/bin/python3   # optional
+KALI_UTM_VM=Kali Linux              # optional, the UTM VM name
+WINDOWS_HOST=192.168.64.10
+WINDOWS_USER=analyst
+WINDOWS_OS=windows
+```
+
+Every tool takes `host=<name>` and branches on that host's OS; an unknown name is refused
+(with the list of known hosts) before anything connects. Without `LABHAND_HOSTS` the
+older keys still work: `KALI_HOST` / `KALI_USER` (+ `KALI_PYTHON`) give `kali`, `WIN_HOST`
+/ `WIN_USER` (+ `WIN_PYTHON_EXE`) give `windows`. The key is never printed or committed.
 
 ## Use as a library
 

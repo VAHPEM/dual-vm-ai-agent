@@ -2,7 +2,7 @@
 """labhand.windows — split from the original monorepo (verbatim).
 Xem TODO[coupling] cho cac cho can truyen tham so thay cho ws/reasoner."""
 import os, re, json, shlex
-from . import remote
+from . import remote, hosts
 from ._result import VMResult, _spill, _find_match  # noqa
 from .safety import _security_block
 from .images import _prepare_image
@@ -66,10 +66,15 @@ Write-Output ("SCREEN " + $b.Width + "x" + $b.Height + " -> _screen.png")
 """
 
 
-def _win_shot_image(label):
+def _session1(host, ps_body, **kw):
+    """remote.run_in_session1 on this tool's windows host."""
+    return remote.run_in_session1(ps_body, host=host, **kw)
+
+
+def _win_shot_image(label, host):
     """Pull samples/_screen.png off the Windows VM and turn it into an image block."""
     try:
-        raw = remote.read_bytes("samples/_screen.png", host="windows")
+        raw = remote.read_bytes("samples/_screen.png", host=host)
     except Exception as e:  # noqa: BLE001
         return None, f"(screenshot file could not be read back: {e})"
     media, b64, note = _prepare_image(raw, "png")
@@ -78,12 +83,16 @@ def _win_shot_image(label):
     return {"media_type": media, "data": b64}, f"screenshot of {label}{note}"
 
 
-def win_windows(match=None, timeout=40):
+def win_windows(match=None, timeout=40, host=None):
+    _h, _err = hosts.check(host, "win_windows", "windows")
+    if _err:
+        return _err
+    host = _h.name
     body = _PS_LIST_WINDOWS
     if match:
         body = body + "\n" + _PS_DEEP_TEXT.replace("__MATCH__", str(match).replace('"', ""))
     try:
-        text, timed_out = remote.run_in_session1(body, timeout=int(timeout))
+        text, timed_out = _session1(host, body, timeout=int(timeout))
     except Exception as e:  # noqa: BLE001
         return VMResult(False, f"win_windows failed: {e.__class__.__name__}: {e}")
     if timed_out:
@@ -93,36 +102,40 @@ def win_windows(match=None, timeout=40):
         return VMResult(True, "no windows with a title are open on the Windows desktop",
                           detail="(empty desktop)", known=["Windows desktop: no titled windows open"])
     n = len(text.splitlines())
-    detail, _ = _spill("windows", text, "windows")
+    detail, _ = _spill(host, text, "windows")
     return VMResult(True, f"Windows desktop: {n} window line(s)", detail=detail,
                       known=[f"Windows desktop windows: {text[:400]}"], info=detail,
                       flag=_find_match(text))
 
 
-def win_screenshot(timeout=40):
+def win_screenshot(timeout=40, host=None):
+    _h, _err = hosts.check(host, "win_screenshot", "windows")
+    if _err:
+        return _err
+    host = _h.name
     try:
-        text, timed_out = remote.run_in_session1(_PS_SCREENSHOT, timeout=int(timeout))
+        text, timed_out = _session1(host, _PS_SCREENSHOT, timeout=int(timeout))
     except Exception as e:  # noqa: BLE001
         return VMResult(False, f"win_screenshot failed: {e.__class__.__name__}: {e}")
     if timed_out or "SCREEN " not in text:
         return VMResult(False, f"win_screenshot: capture did not report success - {text[:300]}")
-    img, note = _win_shot_image("the Windows desktop")
+    img, note = _win_shot_image("the Windows desktop", host)
     if not img:
         return VMResult(False, f"win_screenshot: {note}")
     return VMResult(True, note + " - it appears on your NEXT turn", detail=text[:400],
                       known=[note], image=img)
 
 
-def _win_exists(win_path):
+def _win_exists(win_path, host):
     try:
         o, _ = remote.ssh_exec(f'if exist "{win_path}" (echo __YES__) else (echo __NO__)',
-                               host="windows", read_timeout=20)
+                               host=host, read_timeout=20)
     except Exception:  # noqa: BLE001 - VM down: let the caller's real call surface it
         return None
     return "__YES__" in (o or "")
 
 
-def _sync_to_windows(win_path):
+def _sync_to_windows(win_path, host):
     """A file the Brain wants to run on Windows is often only on KALI: it was produced
     there (7z x of a WIM into a subdir, a header-fixed .exe written with run_script).
     Spawning it then fails with ExecutableNotFoundError and the Brain wastes stalls on
@@ -135,26 +148,30 @@ def _sync_to_windows(win_path):
     non-empty note means we copied and the Brain should know what/where.
     """
     try:
-        win_samples = remote.win_samples()
+        win_samples = remote.win_samples(host)
     except Exception as e:  # noqa: BLE001
         return True, ""      # can't reach Windows to check - don't block; real call errors
     prefix = win_samples + "\\"
     if not win_path.startswith(prefix):
         # Not under samples/ - we have no Kali mapping. Only report existence.
-        ex = _win_exists(win_path)
+        ex = _win_exists(win_path, host)
         if ex is False:
             return False, (f"win_frida/win_gui_run: '{win_path}' is not on the Windows "
                            "VM and is outside samples/, so it can't be auto-copied from "
                            "Kali. Put it under samples/ (triage/extract do this) first.")
         return True, ""
     rel = win_path[len(prefix):].replace("\\", "/")
-    if _win_exists(win_path):
+    if _win_exists(win_path, host):
         return True, ""      # already there, nothing to do
-    # Missing on Windows. Is it on Kali?
+    # Missing on Windows. Is it on the linux host (Kali) where it was produced?
+    src = next((x.name for x in hosts.inventory().values() if x.os == "linux"), None)
+    if src is None:
+        return False, (f"win_frida/win_gui_run: '{rel}' is not on {host} and the inventory "
+                       "has no linux host to copy it from.")
     kali_rel = "samples/" + rel
     try:
         o, _ = remote.ssh_exec(f'test -f "{kali_rel}" && echo __Y__ || echo __N__',
-                               host="kali", read_timeout=20)
+                               host=src, read_timeout=20)
     except Exception as e:  # noqa: BLE001
         return False, (f"win_frida/win_gui_run: '{rel}' is not on the Windows VM and "
                        f"Kali could not be checked ({e.__class__.__name__}).")
@@ -174,7 +191,7 @@ def _sync_to_windows(win_path):
         listing = (f'find samples -maxdepth 1 -type f \\( -name "{base}" -o '
                    f'-name "{base}:*" \\)')
     try:
-        lo, _ = remote.ssh_exec(listing, host="kali", read_timeout=25)
+        lo, _ = remote.ssh_exec(listing, host=src, read_timeout=25)
     except Exception as e:  # noqa: BLE001
         return False, f"win sync: could not list Kali source dir ({e.__class__.__name__})"
     kfiles = [l.strip() for l in (lo or "").splitlines() if l.strip().startswith("samples/")]
@@ -187,14 +204,14 @@ def _sync_to_windows(win_path):
     win_parent = win_samples + (("\\" + parent.replace("/", "\\")) if parent else "")
     try:
         remote.ssh_exec(f'if not exist "{win_parent}" mkdir "{win_parent}"',
-                        host="windows", read_timeout=20)
+                        host=host, read_timeout=20)
     except Exception:  # noqa: BLE001
         pass
     copied, ads, skipped = 0, 0, 0
     for kf in kfiles:
         krel = kf[len("samples/"):]                 # e.g. GhostStream_ex/.../x.exe or ...txt:LordVoldemort
         try:
-            data = remote.read_bytes(kf, host="kali")
+            data = remote.read_bytes(kf, host=src)
         except Exception:  # noqa: BLE001
             skipped += 1
             continue
@@ -204,7 +221,7 @@ def _sync_to_windows(win_path):
         # write_remote takes a remote path relative to the Windows home; keep the same
         # samples-relative layout. A ':' in krel makes it an ADS on NTFS (that is the point).
         try:
-            remote.write_remote("samples/" + krel, data, host="windows")
+            remote.write_remote("samples/" + krel, data, host=host)
             if ":" in krel.rsplit("/", 1)[-1]:
                 ads += 1
             else:
@@ -221,14 +238,18 @@ def _sync_to_windows(win_path):
     return True, note
 
 
-def win_gui_run(program, args="", wait=6, kill=True, screenshot=True, timeout=60):
+def win_gui_run(program, args="", wait=6, kill=True, screenshot=True, timeout=60, host=None):
+    _h, _err = hosts.check(host, "win_gui_run", "windows")
+    if _err:
+        return _err
+    host = _h.name
     prog = str(program).replace('"', "")
     if not re.match(r"^([A-Za-z]:|[\\/])", prog):
         prog = "$S\\" + prog
     gui_sync_note = ""
     try:
-        _absprog = (remote.win_samples() + prog[2:]) if prog.startswith("$S\\") else prog
-        _ok, gui_sync_note = _sync_to_windows(_absprog)
+        _absprog = (remote.win_samples(host) + prog[2:]) if prog.startswith("$S\\") else prog
+        _ok, gui_sync_note = _sync_to_windows(_absprog, host)
         if not _ok:
             return VMResult(False, gui_sync_note)
     except Exception:  # noqa: BLE001 - never let the sync check itself break the tool
@@ -250,7 +271,7 @@ def win_gui_run(program, args="", wait=6, kill=True, screenshot=True, timeout=60
            'Write-Output "KILLED" }\n' if kill else '\n')
     )
     try:
-        text, timed_out = remote.run_in_session1(body, timeout=int(timeout))
+        text, timed_out = _session1(host, body, timeout=int(timeout))
     except Exception as e:  # noqa: BLE001
         return VMResult(False, f"win_gui_run failed: {e.__class__.__name__}: {e}")
     if "NOT_FOUND=" in text:
@@ -265,9 +286,9 @@ def win_gui_run(program, args="", wait=6, kill=True, screenshot=True, timeout=60
     img = None
     note = ""
     if screenshot and "SCREEN " in text:
-        img, note = _win_shot_image(f"the desktop after running {program}")
+        img, note = _win_shot_image(f"the desktop after running {program}", host)
     summ = f"ran {program} on the Windows desktop" + ("; picture on your next turn" if img else "")
-    detail, _ = _spill("windows", text, "gui_run")
+    detail, _ = _spill(host, text, "gui_run")
     return VMResult(True, summ, detail=detail,
                       known=[f"win_gui_run({program}) -> {text[:400]}"], info=detail,
                       flag=_find_match(text), image=img)
@@ -486,7 +507,11 @@ def _frida_timeout_msg(text, timeout, desktop, wait, driven):
 def win_frida(script, program=None, args="", pid=None, wait=8, kill=True,
               desktop=False, max_lines=800, timeout=90,
               drive=None, drive_window=None, drive_pause=250, drive_after=2,
-              launch=None, launch_wait=5, bat_text="", bat_names=()):
+              launch=None, launch_wait=5, bat_text="", bat_names=(), host=None):
+    _h, _err = hosts.check(host, "win_frida", "windows")
+    if _err:
+        return _err
+    host = _h.name
     # `wait` is time spent INSIDE the driver letting hooks run; `timeout` bounds the whole
     # driver from outside. MEASURED ch8 run 5 s58: the Brain asked for wait=200 (to press
     # 25x10 keys and measure) but left timeout=90, so the driver was killed at 90 s every
@@ -520,7 +545,7 @@ def win_frida(script, program=None, args="", pid=None, wait=8, kill=True,
     if launch:
         desktop = True  # the launched GUI app lives on the session-1 desktop
         _lb = str(launch).replace('"', "").replace("'", "")
-        launch_bat_win = remote.win_samples() + "\\" + _lb.replace("/", "\\")
+        launch_bat_win = remote.win_samples(host) + "\\" + _lb.replace("/", "\\")
         _bat_txt = bat_text
         _m = re.search(r"([A-Za-z0-9_.\- ]+\.exe)", _bat_txt)
         target_exe = _m.group(1).strip() if _m else None
@@ -535,7 +560,7 @@ def win_frida(script, program=None, args="", pid=None, wait=8, kill=True,
         _stem = target_exe[:-4] if target_exe.lower().endswith(".exe") else target_exe
         _ps = (
             f'taskkill /F /T /IM "{target_exe}" 2>$null | Out-Null\n'
-            f'Start-Process -FilePath "{launch_bat_win}" -WorkingDirectory "{remote.win_samples()}"\n'
+            f'Start-Process -FilePath "{launch_bat_win}" -WorkingDirectory "{remote.win_samples(host)}"\n'
             f'Start-Sleep -Seconds {int(launch_wait)}\n'
             f'$p = Get-Process -Name "{_stem}" -ErrorAction SilentlyContinue | '
             'Sort-Object StartTime | Select-Object -Last 1\n'
@@ -543,7 +568,7 @@ def win_frida(script, program=None, args="", pid=None, wait=8, kill=True,
             'else { Write-Output "LAUNCH_PID=none" }\n'
         )
         try:
-            _lout, _lt = remote.run_in_session1(_ps, timeout=int(launch_wait) + 40,
+            _lout, _lt = _session1(host, _ps, timeout=int(launch_wait) + 40,
                                                 task="labhand_frida_launch")
         except Exception as _e:  # noqa: BLE001
             return VMResult(False, f"win_frida(launch): launch step failed: "
@@ -587,10 +612,10 @@ def win_frida(script, program=None, args="", pid=None, wait=8, kill=True,
     if program:
         prog = str(program).replace('"', "")
         if not re.match(r"^([A-Za-z]:|[\\/])", prog):
-            prog = remote.win_samples() + "\\" + prog
+            prog = remote.win_samples(host) + "\\" + prog
     frida_sync_note = ""
     if prog and not pid:
-        _ok, frida_sync_note = _sync_to_windows(prog)
+        _ok, frida_sync_note = _sync_to_windows(prog, host)
         if not _ok:
             return VMResult(False, frida_sync_note)
     if isinstance(args, str):
@@ -600,7 +625,7 @@ def win_frida(script, program=None, args="", pid=None, wait=8, kill=True,
 
     cfg = {"program": prog, "args": arglist, "wait": float(wait),
            "kill": bool(kill), "max_lines": int(max_lines),
-           "js_path": remote.win_samples() + "\\_frida.js"}
+           "js_path": remote.win_samples(host) + "\\_frida.js"}
     if pid:
         cfg["pid"] = int(pid)
     drive_ps1_local = None
@@ -608,33 +633,33 @@ def win_frida(script, program=None, args="", pid=None, wait=8, kill=True,
         _dwin = str(drive_window or "").replace('"', "").replace("`", "")
         _drive_body = _ui_drive_ps(drive_names, _dwin, drive_pause, drive_after, 250)
         drive_ps1_local = _drive_body
-        cfg["drive_ps1"] = remote.win_samples() + "\\_frida_drive.ps1"
-    log_win = remote.win_samples() + "\\_frida_log.txt"
+        cfg["drive_ps1"] = remote.win_samples(host) + "\\_frida_drive.ps1"
+    log_win = remote.win_samples(host) + "\\_frida_log.txt"
     log_js = log_win.replace("\\", "/")
     try:                      # a stale log from an earlier call would read as fresh data
-        remote.ssh_exec(f'del /q "{log_win}"', host="windows", read_timeout=20)
+        remote.ssh_exec(f'del /q "{log_win}"', host=host, read_timeout=20)
     except Exception:  # noqa: BLE001
         pass
     script = _FRIDA_PRELUDE_TMPL.replace("__LOGPATH__", log_js) + script
     try:
-        remote.write_remote("samples/_frida.js", script, host="windows")
-        remote.write_remote("samples/_frida_cfg.json", json.dumps(cfg), host="windows")
-        remote.write_remote("samples/_frida_drv.py", _FRIDA_DRIVER, host="windows")
+        remote.write_remote("samples/_frida.js", script, host=host)
+        remote.write_remote("samples/_frida_cfg.json", json.dumps(cfg), host=host)
+        remote.write_remote("samples/_frida_drv.py", _FRIDA_DRIVER, host=host)
         if drive_ps1_local is not None:
-            remote.write_remote("samples/_frida_drive.ps1", drive_ps1_local, host="windows")
+            remote.write_remote("samples/_frida_drive.ps1", drive_ps1_local, host=host)
     except Exception as e:  # noqa: BLE001
         return VMResult(False, f"win_frida: could not upload the script/driver: "
                                  f"{e.__class__.__name__}: {e}")
 
-    drv = remote.win_samples() + "\\_frida_drv.py"
+    drv = remote.win_samples(host) + "\\_frida_drv.py"
     try:
         if desktop:
-            text, timed_out = remote.run_in_session1(
-                '& "' + remote.WIN_PYTHON_EXE + '" "' + drv + '" 2>&1',
+            text, timed_out = _session1(host, 
+                '& "' + remote.python_for(host) + '" "' + drv + '" 2>&1',
                 timeout=int(timeout), task="labhand_frida")
         else:
-            o, e = remote.ssh_exec('"' + remote.WIN_PYTHON_EXE + '" "' + drv + '"',
-                                   host="windows", read_timeout=int(timeout) + 30)
+            o, e = remote.ssh_exec('"' + remote.python_for(host) + '" "' + drv + '"',
+                                   host=host, read_timeout=int(timeout) + 30)
             text = ((o or "") + (e or "")).strip()
             timed_out = "__FRIDA_END__" not in text
     except Exception as e:  # noqa: BLE001
@@ -662,7 +687,7 @@ def win_frida(script, program=None, args="", pid=None, wait=8, kill=True,
     logged = ""
     try:
         logged = remote.read_bytes("samples/_frida_log.txt",
-                                   host="windows").decode("utf-8", "replace")
+                                   host=host).decode("utf-8", "replace")
     except Exception:  # noqa: BLE001 - no log file is the normal case
         logged = ""
     if logged.strip():
@@ -677,7 +702,7 @@ def win_frida(script, program=None, args="", pid=None, wait=8, kill=True,
                  "call (drive the program from your own JS and raise `wait`); a "
                  "win_ui_seq or a second win_frida afterwards cannot reach a hook "
                  "from this one.")
-    detail, _ = _spill("windows", text, "frida")
+    detail, _ = _spill(host, text, "frida")
     head = f"win_frida: {nsend} send() line(s)"
     if logged.strip():
         head += f", {len(logged.splitlines())} log() line(s)"
@@ -874,7 +899,11 @@ public class VmWin32 {
 """
 
 
-def win_ui_tree(match=None, limit=250, timeout=45):
+def win_ui_tree(match=None, limit=250, timeout=45, host=None):
+    _h, _err = hosts.check(host, "win_ui_tree", "windows")
+    if _err:
+        return _err
+    host = _h.name
     m = str(match or "").replace('"', "").replace("`", "")
     body = _PS_UI_PRELUDE + _PS_WIN32 + """
 $lim = __LIM__
@@ -897,7 +926,7 @@ Write-Output ("W32_LINE_COUNT=" + $w32.Count)
 if ($tops.Count -eq 0 -and $w32.Count -eq 0) { Write-Output "NO_WINDOW_MATCHED" }
 """.replace("__LIM__", str(int(limit))).replace("__MATCH__", m)
     try:
-        text, timed_out = remote.run_in_session1(body, timeout=int(timeout),
+        text, timed_out = _session1(host, body, timeout=int(timeout),
                                                  task="labhand_uitree")
     except Exception as e:  # noqa: BLE001
         return VMResult(False, f"win_ui_tree failed: {e.__class__.__name__}: {e}")
@@ -916,7 +945,7 @@ if ($tops.Count -eq 0 -and $w32.Count -eq 0) { Write-Output "NO_WINDOW_MATCHED" 
         return int(m.group(1)) if m else 0
     nu = _count(r"UIA_CONTROL_COUNT=(\d+)")
     nw = _count(r"W32_LINE_COUNT=(\d+)")
-    detail, _ = _spill("windows", text, "uitree")
+    detail, _ = _spill(host, text, "uitree")
     return VMResult(True, f"win_ui_tree: {nu} UIA control(s), {nw} Win32 line(s)",
                       detail=detail,
                       known=[f"win_ui_tree({match or 'all'}) -> {text[:400]}"],
@@ -924,7 +953,11 @@ if ($tops.Count -eq 0 -and $w32.Count -eq 0) { Write-Output "NO_WINDOW_MATCHED" 
 
 
 def win_ui_click(hwnd=None, target=None, window=None, x=None, y=None, after=1,
-                 timeout=45):
+                 timeout=45, host=None):
+    _h, _err = hosts.check(host, "win_ui_click", "windows")
+    if _err:
+        return _err
+    host = _h.name
     if hwnd is None and target is None and (x is None or y is None):
         return VMResult(False, "win_ui_click: give `hwnd` (from win_ui_tree's W32 "
                                  "lines), or `target`, or both `x` and `y`")
@@ -983,7 +1016,7 @@ Start-Sleep -Seconds __AFTER__
               .replace("__Y__", str(int(y)) if y is not None else "0"))
     what = (f"hwnd={hwnd}" if hw else f"target='{target}'" if t else f"({x},{y})")
     try:
-        text, timed_out = remote.run_in_session1(act + _PS_LIST_WINDOWS,
+        text, timed_out = _session1(host, act + _PS_LIST_WINDOWS,
                                                  timeout=int(timeout),
                                                  task="labhand_uiclick")
     except Exception as e:  # noqa: BLE001
@@ -1001,7 +1034,7 @@ Start-Sleep -Seconds __AFTER__
                                    "x/y centre of the rect win_ui_tree printed.")
     m = re.search(r"CLICKED_[A-Za-z_0-9,]+", text)
     how = m.group(0) if m else "?"
-    detail, _ = _spill("windows", text, "uiclick")
+    detail, _ = _spill(host, text, "uiclick")
     return VMResult(True, f"clicked {what} via {how}", detail=detail,
                       known=[f"win_ui_click({what}) -> {text[:400]}"],
                       info=detail, flag=_find_match(text))
@@ -1011,7 +1044,11 @@ _SENDKEYS_SPECIAL = "+^%~(){}[]"
 
 
 def win_ui_type(text, hwnd=None, target=None, window=None, enter=False,
-                sendkeys=False, after=1, timeout=45):
+                sendkeys=False, after=1, timeout=45, host=None):
+    _h, _err = hosts.check(host, "win_ui_type", "windows")
+    if _err:
+        return _err
+    host = _h.name
     if text is None:
         return VMResult(False, "win_ui_type: `text` is required")
     raw = str(text)
@@ -1074,7 +1111,7 @@ Start-Sleep -Seconds __AFTER__
                 .replace("__ENTER__", "$true" if enter else "$false"))
     where = (f"hwnd={hwnd}" if hw else f"target='{target}'" if t else "the focused control")
     try:
-        out, timed_out = remote.run_in_session1(body + _PS_LIST_WINDOWS,
+        out, timed_out = _session1(host, body + _PS_LIST_WINDOWS,
                                                 timeout=int(timeout),
                                                 task="labhand_uitype")
     except Exception as e:  # noqa: BLE001
@@ -1093,13 +1130,17 @@ Start-Sleep -Seconds __AFTER__
                                  "to whatever had focus instead, which is probably not "
                                  "what you wanted. Run win_ui_tree again (the handle may "
                                  "be stale) and use a CURRENT hwnd or AutomationId.")
-    detail, _ = _spill("windows", out, "uitype")
+    detail, _ = _spill(host, out, "uitype")
     return VMResult(True, f"typed '{raw[:40]}' into {where} via {how}", detail=detail,
                       known=[f"win_ui_type({where}) -> {out[:400]}"],
                       info=detail, flag=_find_match(out))
 
 
-def win_key(keys, window=None, after=1, timeout=45):
+def win_key(keys, window=None, after=1, timeout=45, host=None):
+    _h, _err = hosts.check(host, "win_key", "windows")
+    if _err:
+        return _err
+    host = _h.name
     raw = str(keys or "")
     if not raw.strip():
         return VMResult(False, "win_key: `keys` is empty - give SendKeys text, "
@@ -1132,7 +1173,7 @@ Start-Sleep -Seconds __AFTER__
     body = (body.replace("__WINDOW__", w).replace("__KEYS__", raw)
                 .replace("__AFTER__", str(int(after))))
     try:
-        out, timed_out = remote.run_in_session1(body + _PS_LIST_WINDOWS,
+        out, timed_out = _session1(host, body + _PS_LIST_WINDOWS,
                                                 timeout=int(timeout), task="labhand_key")
     except Exception as e:  # noqa: BLE001
         return VMResult(False, f"win_key failed: {e.__class__.__name__}: {e}")
@@ -1142,7 +1183,7 @@ Start-Sleep -Seconds __AFTER__
         return VMResult(False, f"win_key: no window matches '{window}' - run "
                                  "win_ui_tree to see the exact title, or omit `window` "
                                  "to send to the foreground window.")
-    detail, _ = _spill("windows", out, "winkey")
+    detail, _ = _spill(host, out, "winkey")
     return VMResult(True, f"sent keys '{raw[:40]}'"
                       + (f" to '{window}'" if window else " to the foreground window"),
                       detail=detail, known=[f"win_key({raw[:40]}) -> {out[:300]}"],
@@ -1208,7 +1249,11 @@ def _ui_drive_ps(names, window, pause=250, after=2, limit=250):
         .replace("__AFTER__", str(int(after))).replace("__LIM__", str(int(limit)))
 
 
-def win_ui_seq(clicks, window=None, pause=250, after=2, limit=250, timeout=120):
+def win_ui_seq(clicks, window=None, pause=250, after=2, limit=250, timeout=120, host=None):
+    _h, _err = hosts.check(host, "win_ui_seq", "windows")
+    if _err:
+        return _err
+    host = _h.name
     raw = str(clicks or "")
     names = [x.strip() for x in raw.split(",")] if "," in raw else list(raw)
     names = [n for n in names if n]
@@ -1278,7 +1323,7 @@ if ($tops.Count -eq 0) { Write-Output "NO_WINDOW_MATCHED" } else {
    .replace("__PAUSE__", str(int(pause))).replace("__AFTER__", str(int(after))) \
    .replace("__LIM__", str(int(limit)))
     try:
-        text, timed_out = remote.run_in_session1(body, timeout=int(timeout),
+        text, timed_out = _session1(host, body, timeout=int(timeout),
                                                  task="labhand_uiseq")
     except Exception as e:  # noqa: BLE001
         return VMResult(False, f"win_ui_seq failed: {e.__class__.__name__}: {e}")
@@ -1298,7 +1343,7 @@ if ($tops.Count -eq 0) { Write-Output "NO_WINDOW_MATCHED" } else {
         nok, nfail, ntot = int(m.group(1)), int(m.group(2)), int(m.group(3))
     else:
         nok, nfail, ntot = 0, 0, len(names)
-    detail, _ = _spill("windows", text, "uiseq")
+    detail, _ = _spill(host, text, "uiseq")
     summary = f"win_ui_seq: pressed {nok}/{ntot}" + (f", {nfail} FAILED" if nfail else "")
     return VMResult(nok > 0, summary, detail=detail,
                       known=[f"win_ui_seq({raw[:60]}) -> {text[:400]}"],

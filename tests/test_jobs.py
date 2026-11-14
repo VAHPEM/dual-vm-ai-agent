@@ -11,7 +11,7 @@ import sys
 
 import pytest
 
-from labhand import jobs, remote
+from labhand import hosts, jobs, remote
 
 
 @pytest.fixture
@@ -30,9 +30,11 @@ def fake_windows(monkeypatch):
 
     monkeypatch.setattr(remote, "write_remote", write_remote)
     monkeypatch.setattr(remote, "ssh_exec", ssh_exec)
-    monkeypatch.setattr(remote, "win_samples", lambda: r"C:\Users\o'neil\samples")
-    monkeypatch.setattr(remote, "WIN_PYTHON_EXE", r"C:\Py\python.exe")
-    return sent
+    monkeypatch.setattr(remote, "win_samples", lambda host=None: r"C:\Users\o'neil\samples")
+    hosts.reload({"KALI_HOST": "k", "KALI_USER": "t", "WIN_HOST": "w", "WIN_USER": "t",
+                  "WIN_PYTHON_EXE": r"C:\Py\python.exe"})
+    yield sent
+    hosts.reload()
 
 
 def test_windows_job_is_created_through_wmi(fake_windows):

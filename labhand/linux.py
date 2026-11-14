@@ -2,14 +2,18 @@
 """labhand.linux — split from the original monorepo (verbatim).
 Xem TODO[coupling] cho cac cho can truyen tham so thay cho ws/reasoner."""
 import re, shlex
-from . import remote
+from . import remote, hosts
 from ._result import VMResult, _spill, _find_match  # noqa
 from .safety import _security_block
 from .images import _prepare_image
 from .shell import _run_and_wrap
 
 
-def linux_gui_run(command, wait=5, screen="1280x800x24", timeout=60):
+def linux_gui_run(command, wait=5, screen="1280x800x24", timeout=60, host=None):
+    h, err = hosts.check(host, "linux_gui_run", "linux")
+    if err:
+        return err
+    host = h.name
     blocked = _security_block(command)
     if blocked:
         return VMResult(False, f"blocked: this command touches {blocked}")
@@ -19,12 +23,12 @@ def linux_gui_run(command, wait=5, screen="1280x800x24", timeout=60):
              "import -window root _xshot.png 2>&1 && echo XSHOT_OK")
     cmd = ("xvfb-run -a -s " + shlex.quote("-screen 0 " + str(screen)) + " bash -c "
            + shlex.quote(inner))
-    res = _run_and_wrap(cmd, "kali", timeout, f"xvfb({command[:40]})")
+    res = _run_and_wrap(cmd, host, timeout, f"xvfb({command[:40]})")
     if "XSHOT_OK" not in (res.detail or ""):
         return VMResult(False, "linux_gui_run: no screenshot was produced - "
                                  f"output: {(res.detail or '')[:400]}")
     try:
-        raw = remote.read_bytes("samples/_xshot.png", host="kali")
+        raw = remote.read_bytes("samples/_xshot.png", host=host)
     except Exception as e:  # noqa: BLE001
         return VMResult(False, f"linux_gui_run: could not read _xshot.png back ({e})")
     media, b64, note = _prepare_image(raw, "png")
@@ -151,7 +155,11 @@ _GDB_RUN_TAIL = (
 
 
 def linux_gdb(prog, script, args="", gui=True, screen="1280x800x24",
-              max_lines=800, timeout=120):
+              max_lines=800, timeout=120, host=None):
+    h, err = hosts.check(host, "linux_gdb", "linux")
+    if err:
+        return err
+    host = h.name
     if not (script or "").strip():
         return VMResult(False, "linux_gdb: `script` is empty - pass a gdb-python "
                                  "snippet, e.g. hook(0x1234, lambda b: log(reg('rdi'))); run()")
@@ -169,8 +177,8 @@ def linux_gdb(prog, script, args="", gui=True, screen="1280x800x24",
 
     # Write the driver (prelude + exec-tail) and the Brain's script as SEPARATE files, so
     # a Python error in the Brain's code reports ITS line number, not a prelude-shifted one.
-    remote.write_remote("samples/_gdb_run.py", _GDB_PRELUDE + _GDB_RUN_TAIL, host="kali")
-    remote.write_remote("samples/_gdb_user.py", script, host="kali")
+    remote.write_remote("samples/_gdb_run.py", _GDB_PRELUDE + _GDB_RUN_TAIL, host=host)
+    remote.write_remote("samples/_gdb_user.py", script, host=host)
 
     # gdb --args sets the inferior + argv but does NOT start it; the Brain's run()/starti()
     # does. timeout -k 10 tree-kills gdb (and the inferior in its process group) so a hung
@@ -185,7 +193,7 @@ def linux_gdb(prog, script, args="", gui=True, screen="1280x800x24",
         inner = "cd samples 2>/dev/null; " + gdb_cmd + "; echo __GDB_RC=$?"
     cmd = f"bash -c {shlex.quote(inner)}"
 
-    out, errtxt = remote.ssh_exec(cmd, host="kali", read_timeout=timeout + 30)
+    out, errtxt = remote.ssh_exec(cmd, host=host, read_timeout=timeout + 30)
     combined = ((out or "") + (("\n" + errtxt) if (errtxt or "").strip() else "")).strip()
 
     rc = None
@@ -194,7 +202,7 @@ def linux_gdb(prog, script, args="", gui=True, screen="1280x800x24",
         rc = int(mrc.group(1)); combined = combined[:mrc.start()].rstrip()
     timed_out = rc == 124
     if re.search(r"gdb:\s*(command )?not found|No such file.*gdb", combined) and rc:
-        return VMResult(False, "linux_gdb: gdb did not run on Kali - measured output: "
+        return VMResult(False, f"linux_gdb: gdb did not run on {host} - measured output: "
                                  + combined[:400])
     user_exc = "__GDB_USER_EXC__" in combined
     combined = combined.replace("__GDB_USER_EXC__", "").strip()
@@ -206,7 +214,7 @@ def linux_gdb(prog, script, args="", gui=True, screen="1280x800x24",
         combined = "\n".join(lines[:int(max_lines)])
     combined = (combined + capped) if combined else "(gdb produced no output)"
 
-    detail, saved = _spill("kali", combined, "gdb_" + re.sub(r"[^A-Za-z0-9]", "_", prog)[:20])
+    detail, saved = _spill(host, combined, "gdb_" + re.sub(r"[^A-Za-z0-9]", "_", prog)[:20])
     flag = _find_match(combined)
     n = len(combined)
 

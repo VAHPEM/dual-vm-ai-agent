@@ -21,8 +21,11 @@ or "task". The deciding Brain lives elsewhere — any agent that imports this pa
 (repo root). Override with env vars `LABHAND_ENV` / `LABHAND_SSH_KEY` (the pre-rename
 `DUALVM_ENV` / `DUALVM_SSH_KEY` still work as a fallback).
 
-- `.env` keys used: `KALI_HOST`, `KALI_USER`, `WIN_HOST`, `WIN_USER`, and optionally
-  `WIN_PYTHON_EXE`, `KALI_PYTHON`.
+- **Hosts are a named inventory** (`labhand/hosts.py`, example in `.env.example`):
+  `LABHAND_HOSTS=kali,windows` and per host `<NAME>_HOST`, `<NAME>_USER`, `<NAME>_OS`
+  (`linux` | `windows`), optional `<NAME>_PYTHON`, `<NAME>_UTM_VM`. Without
+  `LABHAND_HOSTS` the old keys still work unchanged: `kali` from `KALI_HOST` /
+  `KALI_USER` (+ `KALI_PYTHON`), `windows` from `WIN_HOST` / `WIN_USER` (+ `WIN_PYTHON_EXE`).
 - `.env`, `.env.*`, `.ssh_keys/`, and any private key are **git-ignored — never commit
   them.** This repo is public.
 
@@ -65,14 +68,19 @@ Afterwards tools fill `VMResult.flag` when the pattern appears in raw output.
 
 ## Tools — everything you can do on the VMs
 
-All are `$0`, deterministic, and return raw output. Host is `"kali"` or `"windows"`.
+All are `$0`, deterministic, and return raw output. `host` is a name from the
+inventory; omitted, it is the first host (`win_*`: the first windows host, `linux_*`: the
+first linux host). Every tool branches on the host's **OS**, never its name, and an
+unknown name comes back as `VMResult(ok=False)` listing the known hosts, before any
+connection. Every `win_*` / `linux_*` call below also takes `host=None`.
 
 ### Run commands & read output — `labhand.shell`
 | call | does |
 |---|---|
-| `run_cmd(command, host="kali", timeout=20)` | run one shell line in `samples/` (kali=bash, windows=cmd.exe); raw output. Real tree-killing timeout. |
-| `run_script(script, host="kali", kind=None, timeout=20, python=None)` | write & run a multi-line script (`kind`: bash/python3 on kali; powershell/cmd on windows). |
-| `read_file(path, offset=0, length=4000, host="kali", pinned_docs=())` | page a file on a VM; if not on `host` but on the other VM, serves it from there. |
+| `run_cmd(command, host=None, timeout=20)` | run one shell line in `samples/` (linux=bash, windows=cmd.exe); raw output. Real tree-killing timeout. |
+| `run_script(script, host=None, kind=None, timeout=20, python=None)` | write & run a multi-line script (`kind`: bash/python3 on linux; powershell/cmd on windows). |
+| `read_file(path, offset=0, length=4000, host=None, pinned_docs=())` | page a file on a host; if it is not on `host`, tries every other inventory host in order and says where it was found. |
+| `upload_file(local_path, name=None, host=None)` | copy a local file into the host's `samples/`. |
 
 ### Windows desktop — read / see / run — `labhand.windows`
 | call | does |
@@ -104,8 +112,8 @@ All are `$0`, deterministic, and return raw output. Host is `"kali"` or `"window
 ### Background jobs — `labhand.jobs`
 | call | does |
 |---|---|
-| `job_start(name, command=None, script=None, host="kali", python=None, truncated=False)` | start work in the background, return immediately with a pid. |
-| `job_poll(name=None, tail=40, grep=None, stop=False, host="kali")` | check / tail / `grep` / `stop` a job (omit `name` to list all). |
+| `job_start(name, command=None, script=None, host=None, python=None, truncated=False)` | start work in the background, return immediately with a pid. |
+| `job_poll(name=None, tail=40, grep=None, stop=False, host=None)` | check / tail / `grep` / `stop` a job (omit `name` to list all). |
 
 ## MCP server — expose the Muscle to any MCP client
 
@@ -143,7 +151,7 @@ The server registers as `labhand`. See `labhand/mcp_server.py`.
 
 ## Map of the package
 
-`labhand/`: `remote.py` (SSH/SFTP pool), `shell.py` (run/read), `windows.py`,
+`labhand/`: `hosts.py` (the host inventory), `remote.py` (SSH/SFTP pool), `shell.py` (run/read), `windows.py`,
 `linux.py`, `jobs.py`, `images.py`, `safety.py`, `_result.py` (`VMResult`,
 `set_matcher`), `config.py`, `mcp_server.py`.
 

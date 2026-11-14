@@ -2,7 +2,7 @@
 """labhand.shell — split from the original monorepo (verbatim).
 Xem TODO[coupling] cho cac cho can truyen tham so thay cho ws/reasoner."""
 import os, re, shlex, base64
-from . import remote, config
+from . import remote, config, hosts
 from ._result import VMResult, SLICE, _spill, _save_to_host, _find_match  # noqa
 from .output import _clamp_page
 from .safety import _security_block
@@ -41,10 +41,10 @@ def _read_file_sftp(path, offset, length, host):
                       known=[f"read_file {path}[{offset}:{end}]"], flag=flag)
 
 
-def _read_file_one(path, offset=0, length=SLICE, host="kali"):
+def _read_file_one(path, offset=0, length=SLICE, host=None):
     offset = int(offset or 0)
     length, cap_note = _clamp_page(length)
-    if host == "windows":
+    if remote.is_windows(host):
         return _read_file_sftp(path, offset, length, host)
     # base64, NOT raw bytes: ssh_exec decodes the channel with errors="replace",
     # so every non-ASCII byte used to collapse into one U+FFFD character and
@@ -91,12 +91,17 @@ def _read_file_one(path, offset=0, length=SLICE, host="kali"):
                       known=[f"read_file {path}[{offset}:{end}]"], flag=flag)
 
 
-def read_file(path, offset=0, length=SLICE, host="kali", pinned_docs=()):
-    """Try the host asked for; if the file is not there, try the OTHER one before
-    failing. MEASURED ch8 run 1: four steps (16, 19, 27, 43) were spent asking for a
-    file on `windows` that a kali tool had written - each one a stall, and two of them
-    pushed the run to the expensive top tier. Which VM a tool saved its output on is
-    OUR bookkeeping, not a fact the Brain should have to remember."""
+def read_file(path, offset=0, length=SLICE, host=None, pinned_docs=()):
+    """Try the host asked for (None: the inventory's default host); if the file is not
+    there, try every other host of the inventory, in inventory order, before failing.
+    MEASURED ch8 run 1: four steps (16, 19, 27, 43) were spent asking for a file on
+    `windows` that a kali tool had written - each one a stall, and two of them pushed the
+    run to the expensive top tier. Which VM a tool saved its output on is OUR
+    bookkeeping, not a fact the Brain should have to remember."""
+    h, err = hosts.check(host, "read_file")
+    if err:
+        return err
+    host = h.name
     # Same pinned-doc guard as peek: the VM copy (samples/_analysis/FINDINGS.md) is the
     # same text the Brain already has whole in context (ch8 run 15 s56/s57 read it so).
     _p = str(path).replace("\\", "/")
@@ -110,18 +115,27 @@ def read_file(path, offset=0, length=SLICE, host="kali", pinned_docs=()):
     res = _read_file_one(path, offset=offset, length=length, host=host)
     if res.ok or "does not exist on" not in (res.summary or ""):
         return res
-    other = "kali" if host == "windows" else "windows"
-    try:
-        alt = _read_file_one(path, offset=offset, length=length, host=other)
-    except Exception:  # noqa: BLE001 - the fallback must never turn a miss into a crash
+    others = [n for n in hosts.names() if n != host]
+    checked = [host]
+    for other in others:
+        try:
+            alt = _read_file_one(path, offset=offset, length=length, host=other)
+        except Exception:  # noqa: BLE001 - the fallback must never turn a miss into a crash
+            continue          # an unreachable host is not "the file is missing"
+        checked.append(other)
+        if alt.ok:
+            alt.summary = (f"read_file: '{path}' is NOT on {host} but IS on {other} - "
+                           f"served it from {other}. " + alt.summary)
+            alt.known = [k + f"  (file lives on {other}, not {host})" for k in alt.known]
+            return alt
+        if "does not exist on" not in (alt.summary or ""):
+            # the file IS on `other`; this page failed for its own reason (e.g. past EOF)
+            alt.summary = f"read_file: '{path}' is NOT on {host}, it is on {other}: " + alt.summary
+            return alt
+    if len(checked) == 1:
         return res
-    if alt.ok:
-        alt.summary = (f"read_file: '{path}' is NOT on {host} but IS on {other} - "
-                       f"served it from {other}. " + alt.summary)
-        alt.known = [k + f"  (file lives on {other}, not {host})" for k in alt.known]
-        return alt
-    return VMResult(False, f"read_file: {path} exists on NEITHER {host} nor {other} "
-                             "(both checked just now). Nothing has written it yet - "
+    return VMResult(False, f"read_file: {path} exists on none of {', '.join(checked)} "
+                             "(all checked just now). Nothing has written it yet - "
                              "re-read the output of the tool that was supposed to "
                              "create it instead of reading the path again.")
 
@@ -140,7 +154,7 @@ def _wrap_cmd(command, host, timeout=20):
     signals the whole group, so forked children die too. Exit 124 = timed out.
     windows: NOT built here any more - _run_and_wrap sends Windows commands through
     remote.win_run_bounded, which gives them the same real, tree-killing timeout."""
-    if host == "windows":
+    if remote.is_windows(host):
         return ("cd /d samples 2>nul & " + command +
                 " & if errorlevel 1 (echo __RC=1) else (echo __RC=0)")
     # Snapshot samples/ before and after, in the SAME shell, and report what changed.
@@ -297,9 +311,9 @@ def _run_and_wrap(command, host, timeout, label, grep_shape=None):
     flag scan. `label` is what shows up in the ledger (the command text, or a script
     description) so the two tools can phrase their summary differently. `grep_shape`
     (run_cmd only, see _grep_shape) lets an empty exit-1 grep be read as NO MATCH."""
-    if host == "windows":
+    if remote.is_windows(host):
         # real tree-killing timeout + the true exit code (see remote.win_run_bounded)
-        out, err = remote.win_run_bounded(command, timeout)
+        out, err = remote.win_run_bounded(command, timeout, host=host)
     else:
         out, err = remote.ssh_exec(
             _wrap_cmd(command, host, timeout), host=host, read_timeout=int(timeout) + 25
@@ -369,14 +383,16 @@ def _run_and_wrap(command, host, timeout, label, grep_shape=None):
 MAX_UPLOAD = 200 * 1024 * 1024
 
 
-def upload_file(local_path, name=None, host="kali"):
+def upload_file(local_path, name=None, host=None):
     """Copy a file from the machine running labhand into a VM's samples/ dir (the working dir of run_cmd /
     run_script). `name` is the path inside samples/ (may hold sub-dirs, e.g. 'data/x.bin'); default: the file's
     own name. The library always had this (remote.upload, used inside jobs and Frida), but no tool exposed it:
-    measured 2026-11-13, a worker that needed a 7 KB diff on Kali concluded "dualvm has no upload" and rebuilt
+    measured 2026-11-13, a worker that needed a 7 KB diff on Kali concluded "the library has no upload" and rebuilt
     the files from a GitHub clone instead. -> VMResult; nothing is interpreted."""
-    if host not in ("kali", "windows"):
-        return VMResult(False, f"upload_file: host must be 'kali' or 'windows', not {host!r}")
+    h, err = hosts.check(host, "upload_file")
+    if err:
+        return err
+    host = h.name
     src = os.path.expanduser(str(local_path or ""))
     if not os.path.isfile(src):
         return VMResult(False, f"upload_file: no such local file: {local_path}")
@@ -399,23 +415,30 @@ def upload_file(local_path, name=None, host="kali"):
                     known=[f"{host}:samples/{dest} = {os.path.basename(src)} ({size} bytes)"])
 
 
-def run_cmd(command, host="kali", timeout=20):
+def run_cmd(command, host=None, timeout=20):
+    h, err = hosts.check(host, "run_cmd")
+    if err:
+        return err
     blocked = _security_block(command)
     if blocked:
         return VMResult(False, f"blocked: this command would run {blocked}, which only "
                                  "wrecks the VM's disk (labhand.safety refuses rm -rf /, "
                                  "mkfs/diskpart and format X:); find another way.")
-    return _run_and_wrap(command, host, timeout, _cmd_label(command),
-                         grep_shape=_grep_shape(command) if host != "windows" else None)
+    return _run_and_wrap(command, h.name, timeout, _cmd_label(command),
+                         grep_shape=None if h.is_windows else _grep_shape(command))
 
 
-def run_script(script, host="kali", kind=None, timeout=20, python=None):
+def run_script(script, host=None, kind=None, timeout=20, python=None):
+    h, err = hosts.check(host, "run_script")
+    if err:
+        return err
+    host = h.name
     blocked = _security_block(script)
     if blocked:
         return VMResult(False, f"blocked: this script would run {blocked}, which only "
                                  "wrecks the VM's disk (labhand.safety refuses rm -rf /, "
                                  "mkfs/diskpart and format X:); find another way.")
-    kind = kind or ("powershell" if host == "windows" else "bash")
+    kind = kind or ("powershell" if h.is_windows else "bash")
     exts = {"bash": "sh", "python3": "py", "powershell": "ps1", "cmd": "bat"}
     if kind not in exts:
         return VMResult(False, f"run_script: unknown kind '{kind}' (use one of {list(exts)})")
@@ -425,10 +448,10 @@ def run_script(script, host="kali", kind=None, timeout=20, python=None):
     # remote.KALI_PYTHON (/home/vahpem/analysis-venv/bin/python3), bash-quoted, so
     # run_script(kind="python3", host="windows") asked cmd.exe to run a Linux path in
     # single quotes - it could never work.
-    if host == "windows":
-        py_invoke = f'"{python or remote.WIN_PYTHON_EXE}" {name}'
+    if h.is_windows:
+        py_invoke = f'"{python or h.python}" {name}'
     else:
-        py_invoke = f"{shlex.quote(python or remote.KALI_PYTHON)} {name}"
+        py_invoke = f"{shlex.quote(python or h.python)} {name}"
     invoke = {
         "bash": f"bash {name}",
         "python3": py_invoke,
